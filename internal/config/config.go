@@ -23,7 +23,15 @@ type Config struct {
 	Port     int
 	Env      string
 	LogLevel slog.Level
+
+	// DatabaseURL contains credentials: never log it or include it in errors.
+	DatabaseURL string
+	// DBMaxConns caps the per-instance pool; total connections = Cloud Run max_instances × DBMaxConns.
+	DBMaxConns int32
 }
+
+// maxDBConns guards against a misconfigured pool exhausting Supabase connections across instances.
+const maxDBConns = 50
 
 // Load reads configuration from the environment and validates it.
 func Load() (Config, error) {
@@ -50,11 +58,27 @@ func load(getenv func(string) string) (Config, error) {
 		errs = append(errs, fmt.Errorf("LOG_LEVEL: %w", err))
 	}
 
+	databaseURL := strings.TrimSpace(getenv("DATABASE_URL"))
+	if databaseURL == "" {
+		errs = append(errs, errors.New("DATABASE_URL is required"))
+	}
+
+	maxConns, err := strconv.ParseInt(withDefault(getenv("DB_MAX_CONNS"), "5"), 10, 32)
+	if err != nil || maxConns < 1 || maxConns > maxDBConns {
+		errs = append(errs, fmt.Errorf("DB_MAX_CONNS must be between 1 and %d, got %q", maxDBConns, getenv("DB_MAX_CONNS")))
+	}
+
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)
 	}
 
-	return Config{Port: port, Env: env, LogLevel: level}, nil
+	return Config{
+		Port:        port,
+		Env:         env,
+		LogLevel:    level,
+		DatabaseURL: databaseURL,
+		DBMaxConns:  int32(maxConns),
+	}, nil
 }
 
 func withDefault(v, def string) string {

@@ -33,18 +33,19 @@ Añade dependencias solo cuando el código las importe (`go mod tidy` elimina la
 ```
 cmd/api-server/        main: config, logger, router, http.Server, shutdown SIGTERM
 internal/config/       carga y validación de env vars
-internal/httpapi/      router chi, middleware, handlers (solo transporte)
+internal/httpapi/      router chi, middleware, handlers (solo transporte); /healthz (liveness) y /readyz (ping a Postgres)
+internal/repository/postgres/  pgxpool (NewPool: ping al arrancar, límites de conexiones)
 ```
 
 Paquetes previstos (créalos cuando haya código real, no antes):
 `internal/auth` (JWT Supabase), `internal/tenant` (resolución de contexto/roles), `internal/mcp` (server + tools),
 `internal/application/<dominio>` (casos de uso: appointments, customers, analytics, drafts),
-`internal/repository/postgres`, `internal/integration/{twilio,resend}`, `internal/platform/{audit,pii}`.
+`internal/integration/{twilio,resend}`, `internal/platform/{audit,pii}`.
 
 ## Comandos
 
 ```bash
-go run ./cmd/api-server          # servidor local en :8080 (GET /healthz)
+go run ./cmd/api-server          # servidor local en :8080 (GET /healthz, /readyz); requiere DATABASE_URL
 go test -race ./...              # tests (race necesita CGO; en Windows sin gcc usa: go test ./...)
 golangci-lint run                # lint (config en .golangci.yml)
 golangci-lint fmt                # formatea con gofumpt + goimports
@@ -65,7 +66,7 @@ supabase db reset                # reaplica el snapshot en local
 supabase stop
 ```
 
-DB local: `postgresql://postgres:postgres@127.0.0.1:54322/postgres`. El snapshot solo incluye esquemas de usuario (no los gestionados por Supabase como `auth` o `storage`) y no trae datos.
+DB local: `postgresql://postgres:postgres@127.0.0.1:54322/postgres`. Los tests de integración se saltan salvo que exista `TEST_DATABASE_URL` con esa URL (`TEST_DATABASE_URL=... go test ./...`). El snapshot solo incluye esquemas de usuario (no los gestionados por Supabase como `auth` o `storage`) y no trae datos.
 
 Antes de dar una tarea por terminada: `golangci-lint run` y `go test ./...` deben pasar.
 
