@@ -18,7 +18,7 @@ Márcalo en el mismo commit que completa cada tarea.
 | 3. Base de datos, autenticación y tenant | ✅ hecho y validado contra producción |
 | 4. Endpoint `/mcp` y seguridad de transporte | ✅ hecho y validado contra producción (solo falta `last_used_at`, que requiere permiso) |
 | 5. Plataforma transversal y tools de lectura | ✅ hecho y validado contra producción |
-| 6. Escrituras en dos pasos (drafts) | 🟡 tools implementadas y probadas en local; falta smoke en producción |
+| 6. Escrituras en dos pasos (drafts) | ✅ hecho y validado contra producción (cita real creada por MCP) |
 | 7. Twilio WhatsApp (webhook y notificaciones) | ⬜ pendiente |
 | 8. Fallback REST `/api/actions/*` | ⬜ pendiente |
 | 9. Despliegue en Cloud Run | ⬜ pendiente |
@@ -135,7 +135,7 @@ Todas: tenant solo desde la conexión (test que intenta pasar `tenantId`/`tenant
   - Resumen 13 citas (sin canceladas) frente a 19 en el listado; huecos del miércoles 09:00–17:30 según horario real; sábado sin horario = 0.
   - Rechazos correctos: búsqueda de 1 carácter, fecha pasada, servicio inexistente, rango de 60 días, estado inválido; `%_%` se busca literal.
   - 17 filas de auditoría escritas como el rol: códigos `INVALID_ARGUMENT`/`NOT_FOUND`, `request_id` únicos, sin el texto buscado; `last_used_at` actualizado. Logs sin tokens, cadenas de conexión ni teléfonos.
-- [ ] ⚠️ Dato a revisar en Elvis Studio: el negocio tiene zona `America/Caracas` y la sucursal con horarios `America/Guayaquil`; la otra sucursal (Caracas) no tiene horarios, así que no ofrece huecos.
+- [x] ⚠️ Dato de Elvis Studio corregido en la Fase 6: la sucursal con horarios tenía `America/Guayaquil` y ahora usa `America/Caracas`. La sucursal San Cristóbal sigue sin horarios, así que no ofrece huecos.
 
 ## Fase 6 — Escrituras en dos pasos
 
@@ -176,7 +176,13 @@ Ambas anotadas como escritura no destructiva e idempotente, auditadas con riesgo
   - Unitarios: borrador válido, horario no disponible, IDs de otro tenant, especialista obligatorio, reintento, clave reutilizada con otros datos, carrera, expiración, conexión o clave distinta, mapeo de errores de la RPC. 12 mutaciones detectadas en el servicio y 5 en la capa MCP.
   - Integración como `booknow_mcp_service`: lecturas por tenant, insert idempotente, nombres sin fuga entre tenants, confirmación e idempotencia, errores reales de la RPC (expirado, solapado, rol `employee`, cancelado, inexistente) y **confirmaciones concurrentes con datos confirmados** (solapadas → 1 cita; mismo borrador ×2 → 1 cita + 1 idempotente). 8 mutaciones de SQL detectadas.
   - End-to-end local: cliente MCP → huecos → borrador → reintento → confirmación → repetición → listado → el hueco desaparece.
-- [ ] 🔒 Smoke en producción con token OAuth real. **Crea una cita real**: acordar cliente y horario de prueba y cancelarla después desde el panel.
+- [x] 🔒 Smoke en producción (2026-09-15) con token OAuth real, binario local → pooler con `booknow_mcp_service`:
+  - `tools/list` = 8 tools; las dos nuevas anotadas como escritura no destructiva e idempotente y sin parámetro de tenant (un `tenantId` extra lo rechaza el SDK).
+  - Borrador creado (TTL 10 min, `humanSummary` sin notas), reintento con la misma clave reutilizado, misma clave con otros datos → `CONFLICT`, clave incorrecta al confirmar → `NOT_FOUND`, `draftId` inválido → `INVALID_ARGUMENT`.
+  - Cita real creada a petición del usuario para el cliente `Ps3udo` (su propio usuario): `49f54686` Corte de cabello en Tariba con Miguel, 2026-09-25 13:30–14:00 `America/Caracas`, `pending`, `source = 'mcp'`, con su fila en `appointment_services` y sin `internal_notes`. Segunda confirmación idempotente con la misma cita y el hueco deja de ofrecerse. Se deja creada a propósito para revisarla en el panel.
+  - 8 filas de auditoría con riesgo `write` y códigos correctos; ningún resumen contiene notas ni claves. Logs sin token, sin cadena de conexión y sin teléfonos.
+  - Queda un borrador de prueba sin confirmar que expira solo (el rol no puede borrar; lo purgará D12 cuando se implemente).
+- [x] ⚠️ Zona horaria de Elvis Studio corregida: la sucursal Tariba (Venezuela) tenía `America/Guayaquil` y ofrecía horarios con una hora de desfase. Script ejecutado por el usuario en el SQL Editor: `docs/handoff/sql/fix_elvis_studio_tariba_timezone.sql` (6 horarios activos, 0 citas futuras afectadas). Ambas sucursales quedan en `America/Caracas`.
 - [ ] Revisar las citas `mcp` en el panel de Next.js (etiqueta de `source`) antes de exponer las tools a usuarios reales.
 
 ## Fase 7 — Twilio WhatsApp
