@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 const (
@@ -30,7 +31,7 @@ func TestLoad(t *testing.T) {
 				Port: 8080, Env: EnvDevelopment, LogLevel: slog.LevelInfo,
 				DatabaseURL: testDatabaseURL, DBMaxConns: 5,
 				SupabaseURL: testSupabaseURL, JWTAudience: "authenticated",
-				MCPPublicURL: testPublicURL, MCPRateLimitPerMinute: 60,
+				MCPPublicURL: testPublicURL, MCPRateLimitPerMinute: 60, MCPDraftTTL: 10 * time.Minute,
 			},
 		},
 		{
@@ -39,14 +40,14 @@ func TestLoad(t *testing.T) {
 				"PORT": "9090", "APP_ENV": "Production", "LOG_LEVEL": "debug", "DB_MAX_CONNS": "10",
 				"SUPABASE_URL": "https://abc.supabase.co/", "SUPABASE_JWT_AUDIENCE": "booknow-api",
 				"MCP_PUBLIC_URL": "https://MCP.booknow.app/", "MCP_ALLOWED_ORIGINS": " https://claude.ai, https://ChatGPT.com/ ,",
-				"MCP_RATE_LIMIT_PER_MINUTE": "120",
+				"MCP_RATE_LIMIT_PER_MINUTE": "120", "MCP_DRAFT_TTL_MINUTES": "15",
 			},
 			want: Config{
 				Port: 9090, Env: EnvProduction, LogLevel: slog.LevelDebug,
 				DatabaseURL: testDatabaseURL, DBMaxConns: 10,
 				SupabaseURL: testSupabaseURL, JWTAudience: "booknow-api",
 				MCPPublicURL: testPublicURL, MCPAllowedOrigins: []string{"https://claude.ai", "https://chatgpt.com"},
-				MCPRateLimitPerMinute: 120,
+				MCPRateLimitPerMinute: 120, MCPDraftTTL: 15 * time.Minute,
 			},
 		},
 		{
@@ -60,7 +61,7 @@ func TestLoad(t *testing.T) {
 				DatabaseURL: testDatabaseURL, DBMaxConns: 5,
 				SupabaseURL: "http://127.0.0.1:54321", JWTAudience: "authenticated",
 				MCPPublicURL: "http://localhost:8080", MCPAllowedOrigins: []string{"http://localhost:6274"},
-				MCPRateLimitPerMinute: 60,
+				MCPRateLimitPerMinute: 60, MCPDraftTTL: 10 * time.Minute,
 			},
 		},
 		{name: "invalid port", env: map[string]string{"PORT": "abc"}, wantErr: true},
@@ -89,6 +90,9 @@ func TestLoad(t *testing.T) {
 		{name: "invalid rate limit", env: map[string]string{"MCP_RATE_LIMIT_PER_MINUTE": "lots"}, wantErr: true},
 		{name: "zero rate limit", env: map[string]string{"MCP_RATE_LIMIT_PER_MINUTE": "0"}, wantErr: true},
 		{name: "rate limit above ceiling", env: map[string]string{"MCP_RATE_LIMIT_PER_MINUTE": "10001"}, wantErr: true},
+		{name: "invalid draft ttl", env: map[string]string{"MCP_DRAFT_TTL_MINUTES": "diez"}, wantErr: true},
+		{name: "zero draft ttl", env: map[string]string{"MCP_DRAFT_TTL_MINUTES": "0"}, wantErr: true},
+		{name: "draft ttl above an hour", env: map[string]string{"MCP_DRAFT_TTL_MINUTES": "61"}, wantErr: true},
 	}
 
 	for _, tt := range tests {

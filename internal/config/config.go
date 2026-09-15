@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Environment names accepted in APP_ENV.
@@ -42,6 +43,8 @@ type Config struct {
 	MCPAllowedOrigins []string
 	// MCPRateLimitPerMinute caps MCP requests per connection per instance.
 	MCPRateLimitPerMinute int
+	// MCPDraftTTL is how long an appointment draft waits for human approval before it expires.
+	MCPDraftTTL time.Duration
 }
 
 const (
@@ -49,6 +52,8 @@ const (
 	maxDBConns = 50
 	// maxRateLimitPerMinute keeps a typo from effectively disabling the MCP rate limit.
 	maxRateLimitPerMinute = 10000
+	// maxDraftTTLMinutes keeps drafts short-lived: the slot is not held while waiting for approval.
+	maxDraftTTLMinutes = 60
 )
 
 // Load reads configuration from the environment and validates it.
@@ -110,6 +115,7 @@ func load(getenv func(string) string) (Config, error) {
 		MCPPublicURL:          mcp.MCPPublicURL,
 		MCPAllowedOrigins:     mcp.MCPAllowedOrigins,
 		MCPRateLimitPerMinute: mcp.MCPRateLimitPerMinute,
+		MCPDraftTTL:           mcp.MCPDraftTTL,
 	}, nil
 }
 
@@ -134,6 +140,14 @@ func loadMCP(getenv func(string) string, env string) (Config, []error) {
 		errs = append(errs, fmt.Errorf("MCP_RATE_LIMIT_PER_MINUTE must be between 1 and %d, got %q",
 			maxRateLimitPerMinute, getenv("MCP_RATE_LIMIT_PER_MINUTE")))
 	}
+
+	draftTTL, err := strconv.Atoi(withDefault(getenv("MCP_DRAFT_TTL_MINUTES"), "10"))
+	if err != nil || draftTTL < 1 || draftTTL > maxDraftTTLMinutes {
+		errs = append(errs, fmt.Errorf("MCP_DRAFT_TTL_MINUTES must be between 1 and %d, got %q",
+			maxDraftTTLMinutes, getenv("MCP_DRAFT_TTL_MINUTES")))
+	}
+
+	cfg.MCPDraftTTL = time.Duration(draftTTL) * time.Minute
 
 	return cfg, errs
 }

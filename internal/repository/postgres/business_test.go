@@ -16,7 +16,7 @@ type businessFixture struct {
 	branchA, inactiveBranchA, branchB    string
 	serviceA, inactiveServiceA, serviceB string
 	ana, luis, pedro, eva, zoe           string
-	customerAna                          string
+	customerAna, customerB               string
 }
 
 var gye = func() *time.Location {
@@ -67,8 +67,8 @@ func (s *seeder) branch(tenantID, name string, active bool) string {
 func (s *seeder) service(tenantID, name string, active bool) string {
 	s.t.Helper()
 
-	return s.scanID(`insert into public.services (tenant_id, name, slug, duration_minutes, buffer_minutes, requires_specialist, is_active)
-		values ($1, $2, $3, 60, 10, true, $4) returning id::text`,
+	return s.scanID(`insert into public.services (tenant_id, name, slug, duration_minutes, buffer_minutes, base_price, requires_specialist, is_active)
+		values ($1, $2, $3, 60, 10, 20, true, $4) returning id::text`,
 		tenantID, name, strings.ToLower(name)+"-"+strings.ToLower(s.randomSuffix()), active)
 }
 
@@ -124,7 +124,7 @@ func seedBusiness(s *seeder) businessFixture {
 	f.customerAna = s.customer(f.tenantA, "Ana", "Pérez", "+593991234567")
 	juan := s.customer(f.tenantA, "Juan", "100%real", "")
 	s.customer(f.tenantA, "Juan", "1000x", "0987654321")
-	anaB := s.customer(f.tenantB, "Ana", "Beta", "0991112223")
+	f.customerB = s.customer(f.tenantB, "Ana", "Beta", "0991112223")
 
 	day := "2026-09-16" // Wednesday
 	s.appointment(f.tenantA, f.branchA, f.customerAna, f.serviceA, f.ana, local(day, "09:00"), "confirmed")
@@ -132,7 +132,7 @@ func seedBusiness(s *seeder) businessFixture {
 	s.appointment(f.tenantA, f.branchA, juan, f.serviceA, "", local(day, "11:00"), "pending")
 	// 23:30 local on the 17th is already the 18th in UTC.
 	s.appointment(f.tenantA, f.branchA, juan, f.serviceA, f.luis, local("2026-09-17", "23:30"), "pending")
-	s.appointment(f.tenantB, f.branchB, anaB, f.serviceB, f.zoe, local(day, "09:00"), "confirmed")
+	s.appointment(f.tenantB, f.branchB, f.customerB, f.serviceB, f.zoe, local(day, "09:00"), "confirmed")
 
 	s.schedule(f.tenantA, f.ana, f.branchA, "wednesday", "09:00", "13:00", "11:00", "11:30", true)
 	s.schedule(f.tenantA, f.ana, f.branchA, "thursday", "09:00", "13:00", "", "", true)
@@ -343,7 +343,7 @@ func TestBusinessStoreSlotCatalog(t *testing.T) {
 	store, f := newBusinessStoreTest(t)
 
 	svc, err := store.SlotService(t.Context(), f.tenantA, f.serviceA)
-	if err != nil || svc.Name != "Corte" || svc.DurationMinutes != 60 || svc.BufferMinutes != 10 || !svc.RequiresSpecialist || !svc.Active {
+	if err != nil || svc.Name != "Corte" || svc.DurationMinutes != 60 || svc.BufferMinutes != 10 || svc.BasePrice != 20 || deref(svc.CurrencyCode) != "USD" || !svc.RequiresSpecialist || !svc.Active {
 		t.Errorf("SlotService() = %+v, %v", svc, err)
 	}
 

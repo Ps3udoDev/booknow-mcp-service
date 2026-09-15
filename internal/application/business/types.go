@@ -266,6 +266,8 @@ type SlotService struct {
 	Name               string
 	DurationMinutes    int
 	BufferMinutes      int
+	BasePrice          float64
+	CurrencyCode       *string
 	RequiresSpecialist bool
 	Active             bool
 }
@@ -343,6 +345,29 @@ type Slot struct {
 	Start       time.Time `json:"start"`
 	End         time.Time `json:"end"`
 	Specialists []Ref     `json:"specialists"`
+}
+
+// SlotCheckInput asks whether a booking can start exactly at Start.
+type SlotCheckInput struct {
+	ServiceID    string
+	BranchID     string
+	SpecialistID string
+	Start        time.Time
+	// ExtraMinutes is added to the service duration (service variant modifier).
+	ExtraMinutes int
+}
+
+// SlotCheck is the result of CheckSlot.
+type SlotCheck struct {
+	Service  SlotService
+	Branch   SlotBranch
+	Timezone string
+	// DurationMinutes is the service duration plus the extra minutes.
+	DurationMinutes int
+	// Available reports whether Start is a bookable slot (for SpecialistID when it is set).
+	Available bool
+	// Specialists are the specialists free at Start; empty for services without specialist.
+	Specialists []Ref
 }
 
 // AvailableSlots is the result of list_available_slots.

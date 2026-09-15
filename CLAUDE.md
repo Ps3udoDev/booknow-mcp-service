@@ -40,9 +40,10 @@ internal/config/       carga y validación de env vars
 internal/httpapi/      router chi, middleware, handlers (solo transporte); /healthz (liveness), /readyz (ping a Postgres),
                        /mcp (Origin → Bearer → tenant → Streamable HTTP stateless con JSON) y /.well-known/oauth-protected-resource
 internal/mcpserver/    servidor MCP por request con tenant.Access ya resuelto; tools con auditoría y errores seguros
-internal/application/business/  casos de uso de lectura (snapshot, agenda, citas, clientes, huecos) y contrato del store
+internal/application/business/  casos de uso de lectura (snapshot, agenda, citas, clientes, huecos, CheckSlot) y contrato del store
+internal/application/drafts/    create/confirm de borradores de cita (idempotencia por conexión, humanSummary, mapeo de errores de la RPC)
 internal/platform/{pii,audit,ratelimit}/  máscara de teléfono, registro de auditoría, rate limit en memoria
-internal/repository/postgres/{business,audit}.go  SQL de las tools y de mcp_tool_calls (tests de integración como booknow_mcp_service)
+internal/repository/postgres/{business,drafts,audit}.go  SQL de las tools, borradores/RPC y mcp_tool_calls (tests de integración como booknow_mcp_service, e2e MCP y concurrencia)
 internal/repository/postgres/  pgxpool (NewPool: ping al arrancar, límites de conexiones)
 internal/auth/         verificación JWT de Supabase (ES256 vía JWKS, iss/aud/exp/nbf/iat, kid obligatorio) y extracción Bearer
 internal/tenant/       autorización MCP: conexión activa exacta (usuario, client_id) + tenant activo + rol owner|admin|manager + módulo business-mcp; sin caché
@@ -51,7 +52,7 @@ internal/repository/postgres/mcp_access.go  consulta de esa autorización (DBTX:
 
 Paquetes previstos (créalos cuando haya código real, no antes):
 
-`internal/application/drafts` (Fase 6), `internal/integration/{twilio,resend}`.
+`internal/integration/{twilio,resend}`.
 
 ## Comandos
 

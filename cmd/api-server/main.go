@@ -18,6 +18,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/application/business"
+	"github.com/Ps3udoDev/booknow-mcp-service/internal/application/drafts"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/auth"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/config"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/httpapi"
@@ -69,6 +70,7 @@ func run() error {
 	}
 
 	accessStore := postgres.NewMCPAccessStore(pool)
+	businessService := business.NewService(postgres.NewBusinessStore(pool))
 
 	deps := httpapi.Deps{
 		DB: pool,
@@ -81,7 +83,8 @@ func run() error {
 			RateLimit:           ratelimit.New(cfg.MCPRateLimitPerMinute),
 			Usage:               accessStore,
 			Tools: mcpserver.Deps{
-				Business: business.NewService(postgres.NewBusinessStore(pool)),
+				Business: businessService,
+				Drafts:   drafts.NewService(postgres.NewDraftStore(pool), businessService, cfg.MCPDraftTTL),
 				Audit:    postgres.NewAuditStore(pool),
 				Logger:   logger,
 			},

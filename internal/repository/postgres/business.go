@@ -254,10 +254,10 @@ func (s *BusinessStore) SlotService(ctx context.Context, tenantID, serviceID str
 	var v business.SlotService
 
 	err := s.db.QueryRow(ctx, `
-		select id::text, name, duration_minutes, coalesce(buffer_minutes, 0),
+		select id::text, name, duration_minutes, coalesce(buffer_minutes, 0), base_price::float8, currency_code,
 		       coalesce(requires_specialist, true), coalesce(is_active, false)
 		from public.services where id = $1 and tenant_id = $2`, serviceID, tenantID).
-		Scan(&v.ID, &v.Name, &v.DurationMinutes, &v.BufferMinutes, &v.RequiresSpecialist, &v.Active)
+		Scan(&v.ID, &v.Name, &v.DurationMinutes, &v.BufferMinutes, &v.BasePrice, &v.CurrencyCode, &v.RequiresSpecialist, &v.Active)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return business.SlotService{}, business.ErrNotFound
 	}

@@ -18,7 +18,7 @@ Márcalo en el mismo commit que completa cada tarea.
 | 3. Base de datos, autenticación y tenant | ✅ hecho y validado contra producción |
 | 4. Endpoint `/mcp` y seguridad de transporte | ✅ hecho y validado contra producción (solo falta `last_used_at`, que requiere permiso) |
 | 5. Plataforma transversal y tools de lectura | ✅ hecho y validado contra producción |
-| 6. Escrituras en dos pasos (drafts) | ⏭️ **siguiente**: migración aplicada y verificada en producción; faltan las tools en Go |
+| 6. Escrituras en dos pasos (drafts) | 🟡 tools implementadas y probadas en local; falta smoke en producción |
 | 7. Twilio WhatsApp (webhook y notificaciones) | ⬜ pendiente |
 | 8. Fallback REST `/api/actions/*` | ⬜ pendiente |
 | 9. Despliegue en Cloud Run | ⬜ pendiente |
@@ -157,18 +157,27 @@ Todas: tenant solo desde la conexión (test que intenta pasar `tenantId`/`tenant
 - [x] D14 corregido en Next.js (commit `f451ed7`, sin push): `source: "app"` y sin enviar el error de Postgres al navegador. 🔒 Pendiente: push y una reserva real desde `/c/[tenant]`.
 - [ ] Next.js (menor, no bloquea): `route.ts:78` todavía devuelve `slotsError.message` al navegador.
 
-- [ ] `create_appointment_draft` — `appointments:write`:
-  - [ ] TTL `MCP_DRAFT_TTL_MINUTES` (10).
-  - [ ] Validación cross-tenant de cliente, servicio, variante, sucursal y especialista.
-  - [ ] Snapshot de duración, precio y moneda, **aplicando `duration_modifier` y `price_modifier` de la variante** (el TS usa solo el precio y la duración base).
-  - [ ] Errores de la RPC mapeados por prefijo a códigos estables; nunca el texto de Postgres (el TS lo reenvía al LLM).
-  - [ ] `idempotency_key` (un reintento devuelve el mismo draft).
-  - [ ] `human_summary` para aprobación humana.
-  - [ ] No inserta en `appointments`.
-- [ ] `confirm_appointment_draft` — `appointments:write`:
-  - [ ] Llama a la RPC `confirm_mcp_appointment_draft` (transaccional, `FOR UPDATE`).
-  - [ ] Idempotente; cita `pending` con `source = 'mcp'`.
-- [ ] Tests: draft válido, slot inválido, IDs de otro tenant, reintento con la misma key, draft expirado, doble confirmación y **dos confirmaciones concurrentes** (una sola cita).
+### Tools (`internal/application/drafts` + `postgres.DraftStore` + `internal/mcpserver`)
+Ambas anotadas como escritura no destructiva e idempotente, auditadas con riesgo `write`; los argumentos extra (p. ej. `tenantId`) los rechaza el SDK antes de llegar al store.
+- [x] `create_appointment_draft`:
+  - [x] TTL `MCP_DRAFT_TTL_MINUTES` (10 por defecto, 1–60).
+  - [x] Validación cross-tenant de cliente activo, variante activa del servicio y, vía `business.CheckSlot`, servicio, sucursal y especialista.
+  - [x] Horario validado con las mismas reglas que `list_available_slots` (rejilla de 30 min, turnos, descansos, excepciones, citas y buffer) y con la duración de la variante; especialista obligatorio si el servicio lo requiere; fecha pasada o a más de 90 días rechazada.
+  - [x] Snapshot de duración, precio (`base_price + price_modifier`) y moneda.
+  - [x] `idempotencyKey` por conexión: reintento con los mismos datos → mismo borrador sin volver a comprobar el horario; misma clave con otros datos → `CONFLICT`; carrera de dos inserts → gana uno y el otro lo reutiliza.
+  - [x] `humanSummary` en español con hora local de la sucursal, sin notas ni teléfonos; indica expiración y que se pida aprobación explícita.
+  - [x] No inserta en `appointments` (el rol no puede).
+- [x] `confirm_appointment_draft`:
+  - [x] Exige borrador del mismo tenant **y conexión** con la misma `idempotencyKey` (D13); si no, `NOT_FOUND`.
+  - [x] Expirado o cancelado → `CONFLICT` sin llamar a la RPC; ya confirmado → respuesta idempotente aunque haya pasado el TTL.
+  - [x] RPC `confirm_mcp_appointment_draft`; errores por prefijo → `NOT_FOUND`, `FORBIDDEN` (estado `denied`), `CONFLICT`; nunca el texto de Postgres.
+- [x] Códigos de auditoría nuevos: `CONFLICT` y `FORBIDDEN`. El resumen de auditoría solo lleva IDs, `scheduledAt` y `hasNotes` (sin notas ni clave).
+- [x] Tests:
+  - Unitarios: borrador válido, horario no disponible, IDs de otro tenant, especialista obligatorio, reintento, clave reutilizada con otros datos, carrera, expiración, conexión o clave distinta, mapeo de errores de la RPC. 12 mutaciones detectadas en el servicio y 5 en la capa MCP.
+  - Integración como `booknow_mcp_service`: lecturas por tenant, insert idempotente, nombres sin fuga entre tenants, confirmación e idempotencia, errores reales de la RPC (expirado, solapado, rol `employee`, cancelado, inexistente) y **confirmaciones concurrentes con datos confirmados** (solapadas → 1 cita; mismo borrador ×2 → 1 cita + 1 idempotente). 8 mutaciones de SQL detectadas.
+  - End-to-end local: cliente MCP → huecos → borrador → reintento → confirmación → repetición → listado → el hueco desaparece.
+- [ ] 🔒 Smoke en producción con token OAuth real. **Crea una cita real**: acordar cliente y horario de prueba y cancelarla después desde el panel.
+- [ ] Revisar las citas `mcp` en el panel de Next.js (etiqueta de `source`) antes de exponer las tools a usuarios reales.
 
 ## Fase 7 — Twilio WhatsApp
 
@@ -247,4 +256,4 @@ Todas: tenant solo desde la conexión (test que intenta pasar `tenantId`/`tenant
 | D11 | Purga de auditoría MCP | `pg_cron` en Supabase con `purge_mcp_tool_calls()`; el rol del servicio no puede borrar. | ✅ Aplicado en producción (job diario 03:17 UTC) |
 | D12 | Retención de `mcp_appointment_drafts` (guarda `customer_notes` del LLM) | Purgar borradores no confirmados antiguos con el mismo cron; no incluido en la migración de la Fase 6. | Pendiente |
 | D14 | `source: "client_app"` en la app cliente de Next.js, rechazado por el `CHECK` | La ruta se usa (botón de reservar en `/c/[tenant]`) y en producción solo hay citas `web` (38): ninguna reserva del cliente se había guardado. Se usa `app` (solo código). | ✅ Commit `f451ed7` en Next.js, pendiente de push |
-| D13 | Confirmar un borrador desde otra conexión del mismo tenant | Go exige mismo tenant **y** misma conexión antes de llamar a la RPC (la RPC solo valida el rol del actor). | Propuesta |
+| D13 | Confirmar un borrador desde otra conexión del mismo tenant | Go exige mismo tenant, misma conexión y la misma `idempotencyKey` antes de llamar a la RPC (la RPC solo valida el rol del actor). | ✅ Confirmado |
