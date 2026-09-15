@@ -73,7 +73,7 @@ Proyecto enlazado: `book-now-hub` (`rrnysepngbycvuciodoj`). **Las migraciones la
 # Snapshot de solo lectura del esquema remoto (gitignored; regenerar cuando Next.js migre)
 supabase db dump --linked -f supabase/migrations/00000000000000_remote_schema.sql
 supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supabase_pooler,realtime,storage-api,mailpit,postgres-meta
-supabase db reset                # carga supabase/roles.sql (roles que el dump no incluye) y reaplica el snapshot
+supabase db reset                # carga supabase/roles.sql (roles que el dump no incluye), reaplica el snapshot y supabase/seed.sql (REVOKE de funciones como en producción)
 supabase stop
 ```
 

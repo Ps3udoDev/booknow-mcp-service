@@ -18,7 +18,7 @@ Márcalo en el mismo commit que completa cada tarea.
 | 3. Base de datos, autenticación y tenant | ✅ hecho y validado contra producción |
 | 4. Endpoint `/mcp` y seguridad de transporte | ✅ hecho y validado contra producción (solo falta `last_used_at`, que requiere permiso) |
 | 5. Plataforma transversal y tools de lectura | ✅ hecho y validado contra producción |
-| 6. Escrituras en dos pasos (drafts) | ⏭️ **siguiente** (requiere migración de permisos) |
+| 6. Escrituras en dos pasos (drafts) | ⏭️ **siguiente**: migración aplicada y verificada en producción; faltan las tools en Go |
 | 7. Twilio WhatsApp (webhook y notificaciones) | ⬜ pendiente |
 | 8. Fallback REST `/api/actions/*` | ⬜ pendiente |
 | 9. Despliegue en Cloud Run | ⬜ pendiente |
@@ -139,10 +139,29 @@ Todas: tenant solo desde la conexión (test que intenta pasar `tenantId`/`tenant
 
 ## Fase 6 — Escrituras en dos pasos
 
+> ⚠️ **Hallazgos en producción** (verificados en solo lectura el 2026-09-15) sobre `confirm_mcp_appointment_draft`:
+> 1. **Nunca ha funcionado**: inserta `source = 'mcp'`, pero `appointments_source_check` no admite `mcp` (0 borradores y 0 citas MCP en producción).
+> 2. Es `SECURITY DEFINER` con `EXECUTE` para `anon` y `authenticated` (vía `PUBLIC`): expuesta por la Data API y confía en el `p_actor_auth_user_id` recibido.
+> 3. Doble reserva: dos borradores distintos del mismo especialista confirmados a la vez crean 2 citas solapadas (reproducido en local con dos sesiones).
+> 4. Devuelve `to_jsonb(a.*)` (notas internas y pagos incluidos), que el TS reenvía al LLM; la respuesta idempotente no valida al actor.
+
+### Prerrequisito: migración de permisos y corrección de la RPC (repo Next.js)
+- [x] SQL preparado y validado en local: `docs/handoff/sql/booknow_mcp_service_phase6_drafts.sql` (sha256 `0fd7a8b2…`) + `verify_booknow_mcp_service_phase6.sql` (47/47 checks, idempotente, `ROLLBACK`). Concurrencia con dos sesiones: sin lock 2 citas, con la migración 1 (`SPECIALIST_UNAVAILABLE`); mismo borrador concurrente → 1 cita e idempotente. Contenido:
+  - `CHECK` de `source` con `mcp`.
+  - `SELECT` por columnas en `service_variants` y `mcp_appointment_drafts`; `INSERT` en drafts sin `id`, `status` ni campos de confirmación; sin `UPDATE`/`DELETE`.
+  - RPC con misma firma y contrato: `search_path = ''`, actor validado siempre, advisory lock por especialista, 15 campos explícitos en el resultado.
+  - `EXECUTE` solo para `service_role` (TS hasta el corte) y `booknow_mcp_service`.
+- [x] 🔒 Pasos 1–2 del handoff hechos en Next.js (`20260915212242_booknow_mcp_service_phase6_drafts.sql`, hash correcto, 47/47 checks, base local limpia). Paso 3 OK tras el mantenimiento: 8/8 migraciones sincronizadas, el dry-run lista solo la nueva, md5 de la RPC `40250d38…`, 0 drafts, 0 `source` fuera de lista y archivo en LF.
+- [x] 🔒 Aplicada con el agente de Next.js (`20260915212242_booknow_mcp_service_phase6_drafts.sql`, commit `5c22145` en book-now-hub, sin push) siguiendo `docs/handoff/nextjs-migracion-fase6-drafts-mcp.md`. Verificado desde aquí en solo lectura: md5 del cuerpo `94939d27…`, `search_path=""`, `EXECUTE` solo para `service_role` y `booknow_mcp_service`, permisos de drafts y variantes correctos, `CHECK` con `mcp` validado y 0 drafts.
+- [x] Snapshot local regenerado. `supabase/seed.sql` aplica en local los mismos `REVOKE` que producción: al reaplicar el dump, los privilegios por defecto de Supabase local volvían a dar `EXECUTE` a `anon` y `authenticated` sobre `confirm_mcp_appointment_draft` y también sobre `purge_mcp_tool_calls`, desde la Fase 5. `go test ./...` con integración pasa.
+- [x] D14 corregido en Next.js (commit `f451ed7`, sin push): `source: "app"` y sin enviar el error de Postgres al navegador. 🔒 Pendiente: push y una reserva real desde `/c/[tenant]`.
+- [ ] Next.js (menor, no bloquea): `route.ts:78` todavía devuelve `slotsError.message` al navegador.
+
 - [ ] `create_appointment_draft` — `appointments:write`:
   - [ ] TTL `MCP_DRAFT_TTL_MINUTES` (10).
   - [ ] Validación cross-tenant de cliente, servicio, variante, sucursal y especialista.
-  - [ ] Snapshot de duración, precio y moneda.
+  - [ ] Snapshot de duración, precio y moneda, **aplicando `duration_modifier` y `price_modifier` de la variante** (el TS usa solo el precio y la duración base).
+  - [ ] Errores de la RPC mapeados por prefijo a códigos estables; nunca el texto de Postgres (el TS lo reenvía al LLM).
   - [ ] `idempotency_key` (un reintento devuelve el mismo draft).
   - [ ] `human_summary` para aprobación humana.
   - [ ] No inserta en `appointments`.
@@ -226,3 +245,6 @@ Todas: tenant solo desde la conexión (test que intenta pasar `tenantId`/`tenant
 | D9 | Pooler de Supabase en producción | Session Pooler (5432) con el rol `booknow_mcp_service`. | ✅ Validado con el smoke test |
 | D10 | Hallazgos de seguridad del webhook Twilio en producción actual | Corregir ya en Next.js o acelerar la Fase 7. | Pendiente |
 | D11 | Purga de auditoría MCP | `pg_cron` en Supabase con `purge_mcp_tool_calls()`; el rol del servicio no puede borrar. | ✅ Aplicado en producción (job diario 03:17 UTC) |
+| D12 | Retención de `mcp_appointment_drafts` (guarda `customer_notes` del LLM) | Purgar borradores no confirmados antiguos con el mismo cron; no incluido en la migración de la Fase 6. | Pendiente |
+| D14 | `source: "client_app"` en la app cliente de Next.js, rechazado por el `CHECK` | La ruta se usa (botón de reservar en `/c/[tenant]`) y en producción solo hay citas `web` (38): ninguna reserva del cliente se había guardado. Se usa `app` (solo código). | ✅ Commit `f451ed7` en Next.js, pendiente de push |
+| D13 | Confirmar un borrador desde otra conexión del mismo tenant | Go exige mismo tenant **y** misma conexión antes de llamar a la RPC (la RPC solo valida el rol del actor). | Propuesta |
