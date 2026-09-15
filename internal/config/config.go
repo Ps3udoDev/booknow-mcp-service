@@ -40,10 +40,16 @@ type Config struct {
 	MCPPublicURL string
 	// MCPAllowedOrigins lists browser origins allowed to call /mcp. Requests without Origin are not affected.
 	MCPAllowedOrigins []string
+	// MCPRateLimitPerMinute caps MCP requests per connection per instance.
+	MCPRateLimitPerMinute int
 }
 
-// maxDBConns guards against a misconfigured pool exhausting Supabase connections across instances.
-const maxDBConns = 50
+const (
+	// maxDBConns guards against a misconfigured pool exhausting Supabase connections across instances.
+	maxDBConns = 50
+	// maxRateLimitPerMinute keeps a typo from effectively disabling the MCP rate limit.
+	maxRateLimitPerMinute = 10000
+)
 
 // Load reads configuration from the environment and validates it.
 func Load() (Config, error) {
@@ -85,15 +91,8 @@ func load(getenv func(string) string) (Config, error) {
 		errs = append(errs, fmt.Errorf("SUPABASE_URL: %w", err))
 	}
 
-	publicURL, err := parseOrigin(getenv("MCP_PUBLIC_URL"), env)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("MCP_PUBLIC_URL: %w", err))
-	}
-
-	allowedOrigins, err := parseOriginList(getenv("MCP_ALLOWED_ORIGINS"), env)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("MCP_ALLOWED_ORIGINS: %w", err))
-	}
+	mcp, mcpErrs := loadMCP(getenv, env)
+	errs = append(errs, mcpErrs...)
 
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)
@@ -108,9 +107,35 @@ func load(getenv func(string) string) (Config, error) {
 		SupabaseURL: supabaseURL,
 		JWTAudience: strings.TrimSpace(withDefault(getenv("SUPABASE_JWT_AUDIENCE"), "authenticated")),
 
-		MCPPublicURL:      publicURL,
-		MCPAllowedOrigins: allowedOrigins,
+		MCPPublicURL:          mcp.MCPPublicURL,
+		MCPAllowedOrigins:     mcp.MCPAllowedOrigins,
+		MCPRateLimitPerMinute: mcp.MCPRateLimitPerMinute,
 	}, nil
+}
+
+// loadMCP reads the MCP endpoint settings into the MCP fields of a Config.
+func loadMCP(getenv func(string) string, env string) (Config, []error) {
+	var (
+		cfg  Config
+		errs []error
+		err  error
+	)
+
+	if cfg.MCPPublicURL, err = parseOrigin(getenv("MCP_PUBLIC_URL"), env); err != nil {
+		errs = append(errs, fmt.Errorf("MCP_PUBLIC_URL: %w", err))
+	}
+
+	if cfg.MCPAllowedOrigins, err = parseOriginList(getenv("MCP_ALLOWED_ORIGINS"), env); err != nil {
+		errs = append(errs, fmt.Errorf("MCP_ALLOWED_ORIGINS: %w", err))
+	}
+
+	cfg.MCPRateLimitPerMinute, err = strconv.Atoi(withDefault(getenv("MCP_RATE_LIMIT_PER_MINUTE"), "60"))
+	if err != nil || cfg.MCPRateLimitPerMinute < 1 || cfg.MCPRateLimitPerMinute > maxRateLimitPerMinute {
+		errs = append(errs, fmt.Errorf("MCP_RATE_LIMIT_PER_MINUTE must be between 1 and %d, got %q",
+			maxRateLimitPerMinute, getenv("MCP_RATE_LIMIT_PER_MINUTE")))
+	}
+
+	return cfg, errs
 }
 
 // parseOriginList parses a comma-separated list of origins, ignoring empty entries.

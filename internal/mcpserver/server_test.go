@@ -17,7 +17,7 @@ func connect(t *testing.T, access tenant.Access) *mcp.ClientSession {
 
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 
-	serverSession, err := New(access).Connect(t.Context(), serverTransport, nil)
+	serverSession, err := New(access, Deps{}).Connect(t.Context(), serverTransport, nil)
 	if err != nil {
 		t.Fatalf("server Connect() error = %v", err)
 	}

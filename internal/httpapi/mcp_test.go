@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/auth"
+	"github.com/Ps3udoDev/booknow-mcp-service/internal/platform/ratelimit"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/tenant"
 )
 
@@ -524,5 +526,119 @@ func TestProtectedResourceMetadata(t *testing.T) {
 		if !slices.Contains(meta.ScopesSupported, "openid") {
 			t.Errorf("%s scopes_supported = %v, want openid", path, meta.ScopesSupported)
 		}
+	}
+}
+
+// fakeUsage records which connections were marked as used.
+type fakeUsage struct {
+	mu    sync.Mutex
+	calls []string
+	err   error
+}
+
+func (u *fakeUsage) RecordConnectionUse(_ context.Context, connectionID string) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	u.calls = append(u.calls, connectionID)
+
+	return u.err
+}
+
+func (u *fakeUsage) recorded() []string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	return slices.Clone(u.calls)
+}
+
+func twoConnectionsServer(t *testing.T, limiter RateLimiter, usage UsageRecorder) *httptest.Server {
+	t.Helper()
+
+	router := NewRouter(slog.New(slog.DiscardHandler), Deps{
+		DB: fakePingerOK{},
+		MCP: MCPConfig{
+			PublicURL:           testPublicURL,
+			AuthorizationServer: testIssuer,
+			Tokens: &fakeVerifier{tokens: map[string]auth.Identity{
+				"token-a": {UserID: "user-a", ClientID: "client-a"},
+				"token-b": {UserID: "user-b", ClientID: "client-b"},
+			}},
+			Access: &fakeResolver{access: map[string]tenant.Access{
+				"user-a": {ConnectionID: "conn-a", TenantSlug: "tenant-a", Role: tenant.RoleOwner},
+				"user-b": {ConnectionID: "conn-b", TenantSlug: "tenant-b", Role: tenant.RoleOwner},
+			}},
+			RateLimit: limiter,
+			Usage:     usage,
+		},
+	})
+
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	return srv
+}
+
+func TestMCPRateLimitPerConnection(t *testing.T) {
+	t.Parallel()
+
+	srv := twoConnectionsServer(t, ratelimit.New(2), nil)
+	call := func(token string) mcpResponse {
+		return doMCP(t, http.MethodPost, srv.URL+"/mcp", map[string]string{"Authorization": "Bearer " + token}, initializeBody)
+	}
+
+	for i := range 2 {
+		if resp := call("token-a"); resp.StatusCode != http.StatusOK {
+			t.Fatalf("call %d for conn-a status = %d, want 200", i+1, resp.StatusCode)
+		}
+	}
+
+	limited := call("token-a")
+	if limited.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("third call for conn-a status = %d, want 429", limited.StatusCode)
+	}
+
+	retryAfter, err := strconv.Atoi(limited.Header.Get("Retry-After"))
+	if err != nil || retryAfter < 1 {
+		t.Errorf("Retry-After = %q, want a positive number of seconds", limited.Header.Get("Retry-After"))
+	}
+
+	body, _ := decodeRPCError(t, limited)
+	if body.Error.Data.ErrorCode != "RATE_LIMITED" {
+		t.Errorf("errorCode = %q, want RATE_LIMITED", body.Error.Data.ErrorCode)
+	}
+
+	if resp := call("token-b"); resp.StatusCode != http.StatusOK {
+		t.Errorf("conn-b status = %d, want 200: limits must be per connection", resp.StatusCode)
+	}
+}
+
+func TestMCPRecordsConnectionUseThrottled(t *testing.T) {
+	t.Parallel()
+
+	usage := &fakeUsage{}
+	srv := twoConnectionsServer(t, nil, usage)
+	call := func(token string) mcpResponse {
+		return doMCP(t, http.MethodPost, srv.URL+"/mcp", map[string]string{"Authorization": "Bearer " + token}, initializeBody)
+	}
+
+	call("token-a")
+	call("token-a")
+	call("token-b")
+	call("token-a")
+
+	if got, want := usage.recorded(), []string{"conn-a", "conn-b"}; !slices.Equal(got, want) {
+		t.Errorf("recorded uses = %v, want %v (once per connection within the throttle window)", got, want)
+	}
+}
+
+func TestMCPUsageRecordingFailureDoesNotFailRequest(t *testing.T) {
+	t.Parallel()
+
+	srv := twoConnectionsServer(t, nil, &fakeUsage{err: errors.New(secretInternalText)})
+
+	resp := doMCP(t, http.MethodPost, srv.URL+"/mcp", map[string]string{"Authorization": "Bearer token-a"}, initializeBody)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200 even when recording usage fails", resp.StatusCode)
 	}
 }

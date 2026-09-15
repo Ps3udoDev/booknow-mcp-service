@@ -8,3 +8,7 @@ begin
   end if;
 end
 $$;
+
+-- Local only: lets integration tests run store queries as the service role (SET LOCAL ROLE) to verify
+-- that production grants are sufficient. Never granted in production.
+grant booknow_mcp_service to postgres with set true;

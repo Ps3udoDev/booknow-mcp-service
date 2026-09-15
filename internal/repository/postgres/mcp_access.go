@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/tenant"
 )
@@ -13,6 +14,8 @@ import (
 // DBTX is satisfied by *pgxpool.Pool and pgx.Tx, so stores run inside or outside a transaction.
 type DBTX interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
 // MCPAccessStore reads MCP authorization state from Supabase tables.
@@ -81,4 +84,21 @@ func (s *MCPAccessStore) FindMCPAccess(ctx context.Context, userID, clientID str
 	r.MemberActive = r.MemberFound && r.MemberActive
 
 	return r, nil
+}
+
+// recordConnectionUseSQL writes at most once every 5 minutes per connection across all instances,
+// so frequent MCP traffic does not turn into a write per request.
+const recordConnectionUseSQL = `
+update public.mcp_connections
+set last_used_at = now()
+where id = $1
+  and (last_used_at is null or last_used_at < now() - interval '5 minutes')`
+
+// RecordConnectionUse marks the connection as recently used. Only last_used_at is writable by the service role.
+func (s *MCPAccessStore) RecordConnectionUse(ctx context.Context, connectionID string) error {
+	if _, err := s.db.Exec(ctx, recordConnectionUseSQL, connectionID); err != nil {
+		return fmt.Errorf("record mcp connection use: %w", err)
+	}
+
+	return nil
 }

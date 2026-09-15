@@ -58,6 +58,15 @@ func newSeeder(t *testing.T, pool *pgxpool.Pool) *seeder {
 	return &seeder{t: t, tx: tx}
 }
 
+// asServiceRole switches the rest of the transaction to the production least-privilege role,
+// so store queries are checked against the same grants as in Supabase. Seed data before calling it.
+// The local membership comes from supabase/roles.sql.
+func (s *seeder) asServiceRole() {
+	s.t.Helper()
+
+	s.exec(`set local role booknow_mcp_service`)
+}
+
 func (s *seeder) scanID(sql string, args ...any) string {
 	s.t.Helper()
 
@@ -289,6 +298,7 @@ func TestMCPAccessStoreIntegration(t *testing.T) {
 
 			s := newSeeder(t, pool)
 			userID, clientID, want := tt.setup(s)
+			s.asServiceRole()
 
 			got, err := NewMCPAccessStore(s.tx).FindMCPAccess(t.Context(), userID, clientID)
 			if !errors.Is(err, tt.wantErr) {
@@ -312,6 +322,8 @@ func TestResolverIntegration(t *testing.T) {
 
 	resolver := tenant.NewResolver(NewMCPAccessStore(s.tx))
 	identity := auth.Identity{UserID: userID, ClientID: testClientID}
+
+	// Role and status changes below are admin writes, so this test keeps the postgres role.
 
 	access, err := resolver.Resolve(t.Context(), identity)
 	if err != nil {
@@ -338,4 +350,61 @@ func TestResolverIntegration(t *testing.T) {
 
 func equalRecords(a, b tenant.AccessRecord) bool {
 	return reflect.DeepEqual(a, b)
+}
+
+func TestRecordConnectionUseIntegration(t *testing.T) {
+	t.Parallel()
+
+	pool := integrationPool(t)
+	s := newSeeder(t, pool)
+	_, _, _, connID := s.grantedFixture()
+
+	lastUsed := func() *time.Time {
+		t.Helper()
+
+		var ts *time.Time
+		if err := s.tx.QueryRow(t.Context(), `select last_used_at from public.mcp_connections where id = $1`, connID).Scan(&ts); err != nil {
+			t.Fatalf("read last_used_at: %v", err)
+		}
+
+		return ts
+	}
+
+	store := NewMCPAccessStore(s.tx)
+	s.asServiceRole()
+
+	if err := store.RecordConnectionUse(t.Context(), connID); err != nil {
+		t.Fatalf("RecordConnectionUse() as service role error = %v", err)
+	}
+
+	first := lastUsed()
+	if first == nil {
+		t.Fatal("last_used_at = NULL after first use, want a timestamp")
+	}
+
+	s.exec(`reset role`)
+	s.exec(`update public.mcp_connections set last_used_at = now() - interval '2 minutes' where id = $1`, connID)
+	recent := lastUsed()
+	s.asServiceRole()
+
+	if err := store.RecordConnectionUse(t.Context(), connID); err != nil {
+		t.Fatalf("second RecordConnectionUse() error = %v", err)
+	}
+
+	if got := lastUsed(); !got.Equal(*recent) {
+		t.Errorf("last_used_at changed within the throttle window: %v -> %v", *recent, *got)
+	}
+
+	s.exec(`reset role`)
+	s.exec(`update public.mcp_connections set last_used_at = now() - interval '10 minutes' where id = $1`, connID)
+	stale := lastUsed()
+	s.asServiceRole()
+
+	if err := store.RecordConnectionUse(t.Context(), connID); err != nil {
+		t.Fatalf("third RecordConnectionUse() error = %v", err)
+	}
+
+	if got := lastUsed(); !got.After(*stale) {
+		t.Errorf("last_used_at = %v, want it refreshed after the throttle window (was %v)", *got, *stale)
+	}
 }

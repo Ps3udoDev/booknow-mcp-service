@@ -57,6 +57,12 @@ type MCPConfig struct {
 	AllowedOrigins []string
 	Tokens         TokenVerifier
 	Access         AccessResolver
+	// RateLimit is optional; nil disables per-connection limiting.
+	RateLimit RateLimiter
+	// Usage is optional; nil disables last_used_at tracking.
+	Usage UsageRecorder
+	// Tools are the dependencies of the MCP tools built for each request.
+	Tools mcpserver.Deps
 }
 
 func mountMCP(r chi.Router, logger *slog.Logger, cfg MCPConfig) {
@@ -80,7 +86,7 @@ func mountMCP(r chi.Router, logger *slog.Logger, cfg MCPConfig) {
 			return nil
 		}
 
-		return mcpserver.New(access)
+		return mcpserver.New(access, cfg.Tools)
 	}, &mcp.StreamableHTTPOptions{
 		Stateless:           true,
 		JSONResponse:        true,
@@ -88,7 +94,7 @@ func mountMCP(r chi.Router, logger *slog.Logger, cfg MCPConfig) {
 		MaxRequestBodyBytes: maxMCPBodyBytes,
 	})
 
-	r.Handle(mcpPath, originGuard(cfg.AllowedOrigins)(requireMCPAccess(logger, cfg, metadataURL)(streamable)))
+	r.Handle(mcpPath, originGuard(cfg.AllowedOrigins)(requireMCPAccess(logger, cfg, metadataURL, newUsageThrottle())(streamable)))
 }
 
 // originGuard rejects browser requests from origins outside the allowlist before any authentication,
@@ -136,7 +142,7 @@ func originGuard(allowed []string) func(http.Handler) http.Handler {
 
 // requireMCPAccess authenticates the bearer token and resolves tenant access on every request.
 // The resolved access travels in the request context; tools never receive the tenant as input.
-func requireMCPAccess(logger *slog.Logger, cfg MCPConfig, metadataURL string) func(http.Handler) http.Handler {
+func requireMCPAccess(logger *slog.Logger, cfg MCPConfig, metadataURL string, throttle *usageThrottle) func(http.Handler) http.Handler {
 	challenge := `resource_metadata="` + metadataURL + `"`
 
 	return func(next http.Handler) http.Handler {
@@ -173,6 +179,10 @@ func requireMCPAccess(logger *slog.Logger, cfg MCPConfig, metadataURL string) fu
 				log.ErrorContext(ctx, "mcp access resolution failed", slog.Any("error", err))
 				writeRPCError(w, http.StatusInternalServerError, rpcCodeInternal, "Internal error.", "")
 
+				return
+			}
+
+			if !applyUsagePolicy(w, r, log, cfg, throttle, access) {
 				return
 			}
 

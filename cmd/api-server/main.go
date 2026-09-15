@@ -14,9 +14,15 @@ import (
 	"syscall"
 	"time"
 
+	// Embed the IANA timezone database: tenant and branch timezones must resolve in any container image.
+	_ "time/tzdata"
+
+	"github.com/Ps3udoDev/booknow-mcp-service/internal/application/business"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/auth"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/config"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/httpapi"
+	"github.com/Ps3udoDev/booknow-mcp-service/internal/mcpserver"
+	"github.com/Ps3udoDev/booknow-mcp-service/internal/platform/ratelimit"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/repository/postgres"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/tenant"
 )
@@ -62,6 +68,8 @@ func run() error {
 		return fmt.Errorf("init token verifier: %w", err)
 	}
 
+	accessStore := postgres.NewMCPAccessStore(pool)
+
 	deps := httpapi.Deps{
 		DB: pool,
 		MCP: httpapi.MCPConfig{
@@ -69,7 +77,14 @@ func run() error {
 			AuthorizationServer: auth.IssuerURL(cfg.SupabaseURL),
 			AllowedOrigins:      cfg.MCPAllowedOrigins,
 			Tokens:              verifier,
-			Access:              tenant.NewResolver(postgres.NewMCPAccessStore(pool)),
+			Access:              tenant.NewResolver(accessStore),
+			RateLimit:           ratelimit.New(cfg.MCPRateLimitPerMinute),
+			Usage:               accessStore,
+			Tools: mcpserver.Deps{
+				Business: business.NewService(postgres.NewBusinessStore(pool)),
+				Audit:    postgres.NewAuditStore(pool),
+				Logger:   logger,
+			},
 		},
 	}
 

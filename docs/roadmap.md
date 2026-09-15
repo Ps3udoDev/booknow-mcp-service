@@ -17,8 +17,8 @@ Márcalo en el mismo commit que completa cada tarea.
 | 2. Esqueleto Go | ✅ hecho (falta despliegue a staging, ver Fase 9) |
 | 3. Base de datos, autenticación y tenant | ✅ hecho y validado contra producción |
 | 4. Endpoint `/mcp` y seguridad de transporte | ✅ hecho y validado contra producción (solo falta `last_used_at`, que requiere permiso) |
-| 5. Plataforma transversal y tools de lectura | ⏭️ **siguiente** (permisos ya aplicados en producción) |
-| 6. Escrituras en dos pasos (drafts) | ⬜ pendiente |
+| 5. Plataforma transversal y tools de lectura | ✅ hecho y validado contra producción |
+| 6. Escrituras en dos pasos (drafts) | ⏭️ **siguiente** (requiere migración de permisos) |
 | 7. Twilio WhatsApp (webhook y notificaciones) | ⬜ pendiente |
 | 8. Fallback REST `/api/actions/*` | ⬜ pendiente |
 | 9. Despliegue en Cloud Run | ⬜ pendiente |
@@ -112,19 +112,30 @@ Márcalo en el mismo commit que completa cada tarea.
 - [x] Snapshot local regenerado (incluye `pg_cron`, `purge_mcp_tool_calls` y 80 `GRANT` por columna) y `supabase db reset` verificado. El job de cron no está en local porque `db dump` no copia datos.
 
 ### Transversal
-- [ ] `internal/platform/pii`: máscara determinista de teléfono (`+593******123`); `null` si no hay teléfono; máscara completa si es muy corto. Tests con fuzzing.
-- [ ] `internal/platform/audit`: una fila en `mcp_tool_calls` por tool call al terminar (parámetros sanitizados, riesgo, duración, estado `succeeded|failed|denied`, código de error), sin secretos ni PII. Solo inserción.
+- [x] `internal/platform/pii.MaskPhone`: `+593******567` para internacionales de 10+ dígitos, solo los 3 últimos en locales, máscara completa con 6 dígitos o menos, `nil` sin teléfono. Fuzzing (3 M de entradas): nunca revela más de 6 dígitos ni el número completo.
+- [x] `internal/platform/audit` + `postgres.AuditStore`: una fila por tool call al terminar (estado `succeeded|failed`, riesgo, duración, códigos estables `INVALID_ARGUMENT|NOT_FOUND|INTERNAL`). Resumen sin PII (en `search_customers` solo `queryLength`/`byPhone`, nunca el texto). `INSERT` simple sin `RETURNING`. Se registra aunque el cliente se desconecte y un fallo de auditoría no rompe la tool.
 - [x] Purga de auditoría: `pg_cron` en Supabase (D11); la retención por negocio se aplica en la función SQL.
 - [x] Scopes: la v1 autoriza solo por rol (D5); no se exigen scopes por tool.
-- [ ] Rate limit en memoria por instancia: 60 llamadas/min por conexión MCP (`MCP_RATE_LIMIT_PER_MINUTE`), respuesta 429 con `Retry-After` y limpieza de contadores inactivos. Peor caso acotado por `max-instances` de Cloud Run (D7).
-- [ ] `last_used_at`: `UPDATE ... WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < now() - interval '5 minutes')`, sin bloquear la respuesta si falla.
+- [x] Rate limit en memoria por instancia (`internal/platform/ratelimit`): `MCP_RATE_LIMIT_PER_MINUTE` (60 por defecto, 1–10000) por conexión; 429 JSON-RPC `RATE_LIMITED` con `Retry-After`; las llamadas rechazadas no consumen cupo; limpieza de conexiones inactivas.
+- [x] `last_used_at`: como mucho una escritura por conexión por minuto por instancia (memoria) y una cada 5 minutos en total (SQL); best effort con timeout de 1s.
+- [x] Tests de integración ejecutados **como `booknow_mcp_service`** (`SET LOCAL ROLE`, pertenencia local en `supabase/roles.sql`): confirman que los permisos de producción bastan.
+- [ ] Cancelación: con respuestas JSON sin stream no aplica; revisar `PropagateRequestCancellation` si una tool se vuelve lenta.
 
-### Tools (cada una: filtro por `tenant_id` del contexto, auditoría, tests de integración cross-tenant y comparación con la salida del TS)
-- [ ] `get_business_snapshot` — agregado sin PII.
-- [ ] `get_schedule_summary` — rango ≤ 31 días, filtros `branchId?` y `specialistId?`.
-- [ ] `list_available_slots` — servicio + sucursal + fecha. ⚠️ El TS **ignora** `specialist_schedules`, `schedule_exceptions` y `branches.operating_hours`, así que ofrece horas en las que el especialista no trabaja; en Go se respetan. `schedule_exceptions` no tiene `tenant_id`: se filtra por especialista y sucursal del tenant.
-- [ ] `list_appointments` — paginación ≤ 100, teléfono enmascarado, sin `internal_notes`.
-- [ ] `search_customers` — consulta ≥ 3 caracteres, sin notas privadas, direcciones ni facturación. ⚠️ El TS interpola la búsqueda en `.or()` de PostgREST (inyectable); en Go, SQL parametrizado con escape de `%` y `_`.
+### Tools (`internal/application/business` + `postgres.BusinessStore` + `internal/mcpserver`)
+Todas: tenant solo desde la conexión (test que intenta pasar `tenantId`/`tenant_id` como argumento), anotadas como solo lectura, auditadas, errores seguros para el LLM, tiempos en la zona horaria del negocio o de la sucursal y tests de integración con dos tenants.
+- [x] `get_business_snapshot` — sucursales, especialistas y servicios activos, citas de hoy (zona horaria del negocio, no UTC como el TS), citas por estado y top 5 servicios de los últimos 30 días.
+- [x] `get_schedule_summary` — rango ≤ 31 días en la zona horaria del negocio, sin canceladas, por día local (una cita a las 23:30 locales cuenta en su día, no en el de UTC) y por especialista; filtros de sucursal y especialista validados como UUID.
+- [x] `list_available_slots` — respeta `specialist_schedules` (con descanso), `branches.operating_hours`, `schedule_exceptions` (día libre, ausencias parciales, horario especial por especialista o sucursal), citas `pending|confirmed|in_progress`, buffer del servicio y horas ya pasadas; rejilla de 30 min; fecha de hoy a +90 días. Excepciones sin sucursal ni especialista (sin tenant atribuible) se ignoran. Corrige el TS, que ignoraba horarios y usaba 08:00–19:00 UTC.
+- [x] `list_appointments` — paginación (20 por defecto, máx. 100), estado validado contra el enum, teléfono enmascarado, sin `internal_notes`, fechas locales.
+- [x] `search_customers` — 3–100 caracteres, `ILIKE` con comodines escapados y búsqueda por dígitos del teléfono (≥ 3 dígitos) con SQL parametrizado (el TS era inyectable), teléfono enmascarado.
+- [x] Mutaciones detectadas: 8 en SQL (aislamiento por tenant, canceladas, zona horaria) y 10 en reglas de la capa de tools y huecos.
+- [x] 🔒 Smoke en producción (2026-09-15) con token OAuth real, binario local → pooler con `booknow_mcp_service`:
+  - `tools/list` = 6 tools sin parámetro de tenant; snapshot, resumen, listado, búsqueda y huecos responden con datos reales de Elvis Studio.
+  - 34 teléfonos devueltos, todos enmascarados; sin `internal_notes`; horas con el offset del negocio (`-04:00`) o de la sucursal (`-05:00`).
+  - Resumen 13 citas (sin canceladas) frente a 19 en el listado; huecos del miércoles 09:00–17:30 según horario real; sábado sin horario = 0.
+  - Rechazos correctos: búsqueda de 1 carácter, fecha pasada, servicio inexistente, rango de 60 días, estado inválido; `%_%` se busca literal.
+  - 17 filas de auditoría escritas como el rol: códigos `INVALID_ARGUMENT`/`NOT_FOUND`, `request_id` únicos, sin el texto buscado; `last_used_at` actualizado. Logs sin tokens, cadenas de conexión ni teléfonos.
+- [ ] ⚠️ Dato a revisar en Elvis Studio: el negocio tiene zona `America/Caracas` y la sucursal con horarios `America/Guayaquil`; la otra sucursal (Caracas) no tiene horarios, así que no ofrece huecos.
 
 ## Fase 6 — Escrituras en dos pasos
 

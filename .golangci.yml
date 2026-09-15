@@ -69,6 +69,10 @@ linters:
     nolintlint:
       require-explanation: true
       require-specific: true
+    misspell:
+      # User-facing texts are in Spanish; "clientes" is correct Spanish, not a typo of "clients".
+      ignore-rules:
+        - clientes
     sloglint:
       attr-only: false
       no-global: default
@@ -81,7 +85,7 @@ linters:
       - std-error-handling
     rules:
       - path: _test\.go
-        linters: [funlen, gosec, forcetypeassert]
+        linters: [funlen, gocyclo, gosec, forcetypeassert]
 
 formatters:
   enable:
