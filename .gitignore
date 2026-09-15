@@ -32,6 +32,8 @@ service-account*.json
 # Supabase CLI (estado local)
 supabase/.temp/
 supabase/.branches/
+# Snapshot del esquema remoto (las migraciones las gestiona el repo Next.js)
+supabase/migrations/
 
 # Claude Code (ajustes personales)
 .claude/settings.local.json

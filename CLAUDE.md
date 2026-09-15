@@ -13,7 +13,7 @@ Servidor dedicado en Go para BookNow: **MCP (Streamable HTTP)**, **webhooks/noti
 - `migracion/docs/seguridad-backend-go-cloud-run.md` — checklist de seguridad.
 - `migracion/specs/*.md` — diseño y contrato de implementación del MCP (fuente de verdad del comportamiento).
 - `migracion/mcp/**/*.ts`, `migracion/twilio-whatsapp/*.ts` — implementación TS actual a portar.
-- `migracion/mcp/database/*.sql` — esquema `mcp_connections`, `mcp_appointment_drafts`, `mcp_tool_calls`, RPC `confirm_appointment_draft`.
+- `migracion/mcp/database/*.sql` — esquema `mcp_connections`, `mcp_appointment_drafts`, `mcp_tool_calls`, RPC `confirm_mcp_appointment_draft`.
 
 ## Stack y decisiones
 
@@ -52,6 +52,20 @@ go vet ./...
 govulncheck ./...
 docker build -t booknow-mcp .    # imagen de producción
 ```
+
+### Supabase local (requiere Docker)
+
+Proyecto enlazado: `book-now-hub` (`rrnysepngbycvuciodoj`). **Las migraciones las gestiona el repo Next.js**: aquí nunca se ejecuta `supabase db push`, `db pull` ni `migration repair` contra remoto.
+
+```bash
+# Snapshot de solo lectura del esquema remoto (gitignored; regenerar cuando Next.js migre)
+supabase db dump --linked -f supabase/migrations/00000000000000_remote_schema.sql
+supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supabase_pooler,realtime,storage-api,mailpit,postgres-meta
+supabase db reset                # reaplica el snapshot en local
+supabase stop
+```
+
+DB local: `postgresql://postgres:postgres@127.0.0.1:54322/postgres`. El snapshot solo incluye esquemas de usuario (no los gestionados por Supabase como `auth` o `storage`) y no trae datos.
 
 Antes de dar una tarea por terminada: `golangci-lint run` y `go test ./...` deben pasar.
 
