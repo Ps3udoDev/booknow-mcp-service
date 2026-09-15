@@ -51,6 +51,17 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
+			name: "twilio webhook configured",
+			env:  map[string]string{"TWILIO_AUTH_TOKEN": " secreto ", "TWILIO_WEBHOOK_URL": " https://mcp.booknow.app/webhooks/twilio "},
+			want: Config{
+				Port: 8080, Env: EnvDevelopment, LogLevel: slog.LevelInfo,
+				DatabaseURL: testDatabaseURL, DBMaxConns: 5,
+				SupabaseURL: testSupabaseURL, JWTAudience: "authenticated",
+				MCPPublicURL: testPublicURL, MCPRateLimitPerMinute: 60, MCPDraftTTL: 10 * time.Minute,
+				TwilioAuthToken: "secreto", TwilioWebhookURL: "https://mcp.booknow.app/webhooks/twilio",
+			},
+		},
+		{
 			name: "local http urls in development",
 			env: map[string]string{
 				"SUPABASE_URL": "http://127.0.0.1:54321", "MCP_PUBLIC_URL": "http://localhost:8080",
@@ -90,6 +101,11 @@ func TestLoad(t *testing.T) {
 		{name: "invalid rate limit", env: map[string]string{"MCP_RATE_LIMIT_PER_MINUTE": "lots"}, wantErr: true},
 		{name: "zero rate limit", env: map[string]string{"MCP_RATE_LIMIT_PER_MINUTE": "0"}, wantErr: true},
 		{name: "rate limit above ceiling", env: map[string]string{"MCP_RATE_LIMIT_PER_MINUTE": "10001"}, wantErr: true},
+		{name: "twilio token without url", env: map[string]string{"TWILIO_AUTH_TOKEN": "secreto"}, wantErr: true},
+		{name: "twilio url without token", env: map[string]string{"TWILIO_WEBHOOK_URL": "https://mcp.booknow.app/webhooks/twilio"}, wantErr: true},
+		{name: "twilio url without path", env: map[string]string{"TWILIO_AUTH_TOKEN": "secreto", "TWILIO_WEBHOOK_URL": "https://mcp.booknow.app"}, wantErr: true},
+		{name: "twilio url not absolute", env: map[string]string{"TWILIO_AUTH_TOKEN": "secreto", "TWILIO_WEBHOOK_URL": "/webhooks/twilio"}, wantErr: true},
+		{name: "http twilio url outside development", env: map[string]string{"APP_ENV": "production", "MCP_PUBLIC_URL": "https://mcp.booknow.app", "TWILIO_AUTH_TOKEN": "secreto", "TWILIO_WEBHOOK_URL": "http://mcp.booknow.app/webhooks/twilio"}, wantErr: true},
 		{name: "invalid draft ttl", env: map[string]string{"MCP_DRAFT_TTL_MINUTES": "diez"}, wantErr: true},
 		{name: "zero draft ttl", env: map[string]string{"MCP_DRAFT_TTL_MINUTES": "0"}, wantErr: true},
 		{name: "draft ttl above an hour", env: map[string]string{"MCP_DRAFT_TTL_MINUTES": "61"}, wantErr: true},
@@ -127,5 +143,23 @@ func TestLoadErrorDoesNotLeakDatabaseURL(t *testing.T) {
 
 	if strings.Contains(err.Error(), "secret") {
 		t.Errorf("load() error leaks connection string: %v", err)
+	}
+}
+
+func TestLoadErrorDoesNotLeakTwilioToken(t *testing.T) {
+	t.Parallel()
+
+	env := map[string]string{
+		"DATABASE_URL": testDatabaseURL, "SUPABASE_URL": testSupabaseURL, "MCP_PUBLIC_URL": testPublicURL,
+		"TWILIO_AUTH_TOKEN": "super-secreto", "TWILIO_WEBHOOK_URL": "notaurl",
+	}
+
+	_, err := load(func(k string) string { return env[k] })
+	if err == nil {
+		t.Fatal("load() error = nil, want error")
+	}
+
+	if strings.Contains(err.Error(), "super-secreto") {
+		t.Errorf("load() error leaks the Twilio auth token: %v", err)
 	}
 }

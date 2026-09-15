@@ -45,6 +45,13 @@ type Config struct {
 	MCPRateLimitPerMinute int
 	// MCPDraftTTL is how long an appointment draft waits for human approval before it expires.
 	MCPDraftTTL time.Duration
+
+	// TwilioAuthToken signs Twilio webhooks: it is a secret, never log it or include it in errors.
+	// Empty means the Twilio webhook is not configured and its route is not served.
+	TwilioAuthToken string
+	// TwilioWebhookURL is the public URL configured in Twilio, exactly as Twilio calls it:
+	// it is part of what Twilio signs, so it must match character by character.
+	TwilioWebhookURL string
 }
 
 const (
@@ -99,6 +106,11 @@ func load(getenv func(string) string) (Config, error) {
 	mcp, mcpErrs := loadMCP(getenv, env)
 	errs = append(errs, mcpErrs...)
 
+	twilioToken, twilioURL, twilioErr := loadTwilio(getenv, env)
+	if twilioErr != nil {
+		errs = append(errs, twilioErr)
+	}
+
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)
 	}
@@ -116,6 +128,9 @@ func load(getenv func(string) string) (Config, error) {
 		MCPAllowedOrigins:     mcp.MCPAllowedOrigins,
 		MCPRateLimitPerMinute: mcp.MCPRateLimitPerMinute,
 		MCPDraftTTL:           mcp.MCPDraftTTL,
+
+		TwilioAuthToken:  twilioToken,
+		TwilioWebhookURL: twilioURL,
 	}, nil
 }
 
@@ -207,4 +222,35 @@ func withDefault(v, def string) string {
 	}
 
 	return v
+}
+
+// loadTwilio reads the incoming webhook settings. Both variables travel together: a token without a
+// URL (or the other way round) means a half-configured webhook, which would validate against the
+// wrong URL. Errors never include the token.
+func loadTwilio(getenv func(string) string, env string) (string, string, error) {
+	token := strings.TrimSpace(getenv("TWILIO_AUTH_TOKEN"))
+	raw := strings.TrimSpace(getenv("TWILIO_WEBHOOK_URL"))
+
+	if token == "" && raw == "" {
+		return "", "", nil
+	}
+
+	if token == "" || raw == "" {
+		return "", "", errors.New("TWILIO_AUTH_TOKEN and TWILIO_WEBHOOK_URL must be set together")
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil || !parsed.IsAbs() || parsed.Host == "" || parsed.User != nil {
+		return "", "", fmt.Errorf("TWILIO_WEBHOOK_URL must be an absolute URL without credentials, got %q", raw)
+	}
+
+	if parsed.Path == "" || parsed.Path == "/" {
+		return "", "", fmt.Errorf("TWILIO_WEBHOOK_URL must include the webhook path, got %q", raw)
+	}
+
+	if parsed.Scheme != "https" && (parsed.Scheme != "http" || env != EnvDevelopment) {
+		return "", "", fmt.Errorf("TWILIO_WEBHOOK_URL must use https outside development, got %q", raw)
+	}
+
+	return token, raw, nil
 }
