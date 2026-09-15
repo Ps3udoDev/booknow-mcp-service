@@ -1,0 +1,47 @@
+# Material de referencia para la migración (solo local, nunca se commitea)
+migracion/
+
+# Binarios y artefactos de build
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Cobertura y profiling
+/coverage.*
+*.coverprofile
+*.pprof
+
+# Workspaces locales de Go
+go.work
+go.work.sum
+
+# Secretos y entorno local
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+service-account*.json
+
+# Supabase CLI (estado local)
+supabase/.temp/
+supabase/.branches/
+
+# Claude Code (ajustes personales)
+.claude/settings.local.json
+
+# IDE / SO
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+
+.claude/

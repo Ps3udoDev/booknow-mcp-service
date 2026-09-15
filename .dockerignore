@@ -1,0 +1,15 @@
+.git
+.github
+.claude
+migracion
+bin
+dist
+coverage.*
+*.test
+.env
+.env.*
+*.pem
+*.key
+service-account*.json
+CLAUDE.md
+README.md
