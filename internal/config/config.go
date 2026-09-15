@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -28,6 +29,11 @@ type Config struct {
 	DatabaseURL string
 	// DBMaxConns caps the per-instance pool; total connections = Cloud Run max_instances × DBMaxConns.
 	DBMaxConns int32
+
+	// SupabaseURL is the project base URL (no path); JWT issuer and JWKS URL derive from it.
+	SupabaseURL string
+	// JWTAudience is the required "aud" claim of Supabase access tokens.
+	JWTAudience string
 }
 
 // maxDBConns guards against a misconfigured pool exhausting Supabase connections across instances.
@@ -68,6 +74,11 @@ func load(getenv func(string) string) (Config, error) {
 		errs = append(errs, fmt.Errorf("DB_MAX_CONNS must be between 1 and %d, got %q", maxDBConns, getenv("DB_MAX_CONNS")))
 	}
 
+	supabaseURL, err := parseSupabaseURL(getenv("SUPABASE_URL"), env)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("SUPABASE_URL: %w", err))
+	}
+
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)
 	}
@@ -78,7 +89,37 @@ func load(getenv func(string) string) (Config, error) {
 		LogLevel:    level,
 		DatabaseURL: databaseURL,
 		DBMaxConns:  int32(maxConns),
+		SupabaseURL: supabaseURL,
+		JWTAudience: strings.TrimSpace(withDefault(getenv("SUPABASE_JWT_AUDIENCE"), "authenticated")),
 	}, nil
+}
+
+// parseSupabaseURL accepts only a bare origin: tokens are trusted based on it, so anything ambiguous is rejected.
+// Plain http is allowed only in development, for the local Supabase stack.
+func parseSupabaseURL(raw, env string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", errors.New("is required")
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		// The raw value is not echoed: a malformed URL may carry credentials.
+		return "", errors.New("must be an absolute URL like https://<project-ref>.supabase.co")
+	}
+
+	switch {
+	case u.Scheme == "https":
+	case u.Scheme == "http" && env == EnvDevelopment:
+	default:
+		return "", fmt.Errorf("must use https (http only in %s), got scheme %q", EnvDevelopment, u.Scheme)
+	}
+
+	if u.User != nil || strings.Trim(u.Path, "/") != "" || u.RawQuery != "" || u.Fragment != "" {
+		return "", errors.New("must be the project origin only, e.g. https://<project-ref>.supabase.co")
+	}
+
+	return u.Scheme + "://" + u.Host, nil
 }
 
 func withDefault(v, def string) string {

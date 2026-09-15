@@ -35,10 +35,11 @@ cmd/api-server/        main: config, logger, router, http.Server, shutdown SIGTE
 internal/config/       carga y validación de env vars
 internal/httpapi/      router chi, middleware, handlers (solo transporte); /healthz (liveness) y /readyz (ping a Postgres)
 internal/repository/postgres/  pgxpool (NewPool: ping al arrancar, límites de conexiones)
+internal/auth/         verificación JWT de Supabase (ES256 vía JWKS, iss/aud/exp/nbf/iat, kid obligatorio) y extracción Bearer
 ```
 
 Paquetes previstos (créalos cuando haya código real, no antes):
-`internal/auth` (JWT Supabase), `internal/tenant` (resolución de contexto/roles), `internal/mcp` (server + tools),
+`internal/tenant` (resolución de contexto/roles), `internal/mcp` (server + tools),
 `internal/application/<dominio>` (casos de uso: appointments, customers, analytics, drafts),
 `internal/integration/{twilio,resend}`, `internal/platform/{audit,pii}`.
 
@@ -66,7 +67,7 @@ supabase db reset                # reaplica el snapshot en local
 supabase stop
 ```
 
-DB local: `postgresql://postgres:postgres@127.0.0.1:54322/postgres`. Los tests de integración se saltan salvo que exista `TEST_DATABASE_URL` con esa URL (`TEST_DATABASE_URL=... go test ./...`). El snapshot solo incluye esquemas de usuario (no los gestionados por Supabase como `auth` o `storage`) y no trae datos.
+DB local: `postgresql://postgres:postgres@127.0.0.1:54322/postgres`. Los tests de integración se saltan salvo que existan sus variables: `TEST_DATABASE_URL` (esa URL) para Postgres, y `TEST_SUPABASE_URL=http://127.0.0.1:54321` + `TEST_SUPABASE_PUBLISHABLE_KEY` (de `supabase status`) para Auth. El snapshot solo incluye esquemas de usuario (no los gestionados por Supabase como `auth` o `storage`) y no trae datos.
 
 Antes de dar una tarea por terminada: `golangci-lint run` y `go test ./...` deben pasar.
 
