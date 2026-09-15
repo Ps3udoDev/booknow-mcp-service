@@ -2,6 +2,10 @@
 
 Servidor dedicado en Go para BookNow: **MCP (Streamable HTTP)**, **webhooks/notificaciones Twilio WhatsApp** y API REST de negocio, sobre **Supabase** (Postgres + Auth) y desplegado en **Cloud Run**. Reemplaza gradualmente las rutas `/api/mcp`, `/api/actions/*` y `/api/webhooks/twilio` de la app Next.js en Vercel.
 
+## Estado del proyecto
+
+`docs/roadmap.md` es el checklist de fases, tareas y decisiones abiertas. Actualízalo (marca `[x]` con el hash del commit) en el mismo commit que completa una tarea.
+
 ## Material de referencia (local, no versionado)
 
 `migracion/` está en `.gitignore` y es **solo lectura** (un hook bloquea su edición). Consúltalo antes de implementar cada pieza:
@@ -33,7 +37,9 @@ Añade dependencias solo cuando el código las importe (`go mod tidy` elimina la
 ```
 cmd/api-server/        main: config, logger, router, http.Server, shutdown SIGTERM
 internal/config/       carga y validación de env vars
-internal/httpapi/      router chi, middleware, handlers (solo transporte); /healthz (liveness) y /readyz (ping a Postgres)
+internal/httpapi/      router chi, middleware, handlers (solo transporte); /healthz (liveness), /readyz (ping a Postgres),
+                       /mcp (Origin → Bearer → tenant → Streamable HTTP stateless con JSON) y /.well-known/oauth-protected-resource
+internal/mcpserver/    servidor MCP por request construido con tenant.Access ya resuelto; registro de tools
 internal/repository/postgres/  pgxpool (NewPool: ping al arrancar, límites de conexiones)
 internal/auth/         verificación JWT de Supabase (ES256 vía JWKS, iss/aud/exp/nbf/iat, kid obligatorio) y extracción Bearer
 internal/tenant/       autorización MCP: conexión activa exacta (usuario, client_id) + tenant activo + rol owner|admin|manager + módulo business-mcp; sin caché
@@ -41,7 +47,7 @@ internal/repository/postgres/mcp_access.go  consulta de esa autorización (DBTX:
 ```
 
 Paquetes previstos (créalos cuando haya código real, no antes):
-`internal/mcp` (server + tools),
+
 `internal/application/<dominio>` (casos de uso: appointments, customers, analytics, drafts),
 `internal/integration/{twilio,resend}`, `internal/platform/{audit,pii}`.
 
@@ -65,11 +71,13 @@ Proyecto enlazado: `book-now-hub` (`rrnysepngbycvuciodoj`). **Las migraciones la
 # Snapshot de solo lectura del esquema remoto (gitignored; regenerar cuando Next.js migre)
 supabase db dump --linked -f supabase/migrations/00000000000000_remote_schema.sql
 supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supabase_pooler,realtime,storage-api,mailpit,postgres-meta
-supabase db reset                # reaplica el snapshot en local
+supabase db reset                # carga supabase/roles.sql (roles que el dump no incluye) y reaplica el snapshot
 supabase stop
 ```
 
-DB local: `postgresql://postgres:postgres@127.0.0.1:54322/postgres`. Los tests de integración se saltan salvo que existan sus variables: `TEST_DATABASE_URL` (esa URL) para Postgres, y `TEST_SUPABASE_URL=http://127.0.0.1:54321` + `TEST_SUPABASE_PUBLISHABLE_KEY` (de `supabase status`) para Auth. El snapshot solo incluye esquemas de usuario (no los gestionados por Supabase como `auth` o `storage`) y no trae datos.
+DB local: `postgresql://postgres:postgres@127.0.0.1:54322/postgres`. Los tests de integración se saltan salvo que existan sus variables: `TEST_DATABASE_URL` (esa URL) para Postgres, y `TEST_SUPABASE_URL=http://127.0.0.1:54321` + `TEST_SUPABASE_PUBLISHABLE_KEY` (de `supabase status`) para Auth.
+
+Smoke test remoto de solo lectura contra producción (token → JWKS → pooler → tenant): `set -a; . ./.env.smoke; set +a; go test -run TestRemoteSmoke -v ./internal/repository/postgres/`. `.env.smoke` (gitignored) define `SMOKE_SUPABASE_URL`, `SMOKE_DATABASE_URL` (Session Pooler, rol `booknow_mcp_service`) y `SMOKE_ACCESS_TOKEN` (token OAuth de MCP Inspector, dura ~1 h). Nunca imprimir sus valores. El snapshot solo incluye esquemas de usuario (no los gestionados por Supabase como `auth` o `storage`) y no trae datos.
 
 Antes de dar una tarea por terminada: `golangci-lint run` y `go test ./...` deben pasar.
 

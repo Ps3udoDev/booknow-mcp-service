@@ -377,3 +377,13 @@ func hmacWithPublicKey(t *testing.T, key signingKey, claims jwt.MapClaims) strin
 
 	return signed
 }
+
+func TestIssuerURL(t *testing.T) {
+	t.Parallel()
+
+	for _, in := range []string{"https://abc.supabase.co", "https://abc.supabase.co/"} {
+		if got := IssuerURL(in); got != "https://abc.supabase.co/auth/v1" {
+			t.Errorf("IssuerURL(%q) = %q, want https://abc.supabase.co/auth/v1", in, got)
+		}
+	}
+}

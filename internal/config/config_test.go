@@ -3,6 +3,7 @@ package config
 import (
 	"log/slog"
 	"maps"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -10,6 +11,7 @@ import (
 const (
 	testDatabaseURL = "postgres://user:secret@localhost:5432/postgres"
 	testSupabaseURL = "https://abc.supabase.co"
+	testPublicURL   = "https://mcp.booknow.app"
 )
 
 func TestLoad(t *testing.T) {
@@ -28,6 +30,7 @@ func TestLoad(t *testing.T) {
 				Port: 8080, Env: EnvDevelopment, LogLevel: slog.LevelInfo,
 				DatabaseURL: testDatabaseURL, DBMaxConns: 5,
 				SupabaseURL: testSupabaseURL, JWTAudience: "authenticated",
+				MCPPublicURL: testPublicURL,
 			},
 		},
 		{
@@ -35,20 +38,26 @@ func TestLoad(t *testing.T) {
 			env: map[string]string{
 				"PORT": "9090", "APP_ENV": "Production", "LOG_LEVEL": "debug", "DB_MAX_CONNS": "10",
 				"SUPABASE_URL": "https://abc.supabase.co/", "SUPABASE_JWT_AUDIENCE": "booknow-api",
+				"MCP_PUBLIC_URL": "https://MCP.booknow.app/", "MCP_ALLOWED_ORIGINS": " https://claude.ai, https://ChatGPT.com/ ,",
 			},
 			want: Config{
 				Port: 9090, Env: EnvProduction, LogLevel: slog.LevelDebug,
 				DatabaseURL: testDatabaseURL, DBMaxConns: 10,
 				SupabaseURL: testSupabaseURL, JWTAudience: "booknow-api",
+				MCPPublicURL: testPublicURL, MCPAllowedOrigins: []string{"https://claude.ai", "https://chatgpt.com"},
 			},
 		},
 		{
-			name: "local http supabase in development",
-			env:  map[string]string{"SUPABASE_URL": "http://127.0.0.1:54321"},
+			name: "local http urls in development",
+			env: map[string]string{
+				"SUPABASE_URL": "http://127.0.0.1:54321", "MCP_PUBLIC_URL": "http://localhost:8080",
+				"MCP_ALLOWED_ORIGINS": "http://localhost:6274",
+			},
 			want: Config{
 				Port: 8080, Env: EnvDevelopment, LogLevel: slog.LevelInfo,
 				DatabaseURL: testDatabaseURL, DBMaxConns: 5,
 				SupabaseURL: "http://127.0.0.1:54321", JWTAudience: "authenticated",
+				MCPPublicURL: "http://localhost:8080", MCPAllowedOrigins: []string{"http://localhost:6274"},
 			},
 		},
 		{name: "invalid port", env: map[string]string{"PORT": "abc"}, wantErr: true},
@@ -67,6 +76,13 @@ func TestLoad(t *testing.T) {
 		{name: "supabase url with credentials", env: map[string]string{"SUPABASE_URL": "https://u:p@abc.supabase.co"}, wantErr: true},
 		{name: "http supabase outside development", env: map[string]string{"APP_ENV": "staging", "SUPABASE_URL": "http://abc.supabase.co"}, wantErr: true},
 		{name: "unsupported supabase scheme", env: map[string]string{"SUPABASE_URL": "ftp://abc.supabase.co"}, wantErr: true},
+		{name: "missing mcp public url", env: map[string]string{"MCP_PUBLIC_URL": ""}, wantErr: true},
+		{name: "mcp public url with path", env: map[string]string{"MCP_PUBLIC_URL": "https://mcp.booknow.app/mcp"}, wantErr: true},
+		{name: "http mcp public url outside development", env: map[string]string{"APP_ENV": "production", "MCP_PUBLIC_URL": "http://mcp.booknow.app"}, wantErr: true},
+		{name: "allowed origin without scheme", env: map[string]string{"MCP_ALLOWED_ORIGINS": "claude.ai"}, wantErr: true},
+		{name: "allowed origin with path", env: map[string]string{"MCP_ALLOWED_ORIGINS": "https://claude.ai/chat"}, wantErr: true},
+		{name: "wildcard allowed origin", env: map[string]string{"MCP_ALLOWED_ORIGINS": "*"}, wantErr: true},
+		{name: "http allowed origin outside development", env: map[string]string{"APP_ENV": "staging", "MCP_ALLOWED_ORIGINS": "http://claude.ai"}, wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -74,7 +90,7 @@ func TestLoad(t *testing.T) {
 			t.Parallel()
 
 			// Required variables start valid; each case may override them.
-			env := map[string]string{"DATABASE_URL": testDatabaseURL, "SUPABASE_URL": testSupabaseURL}
+			env := map[string]string{"DATABASE_URL": testDatabaseURL, "SUPABASE_URL": testSupabaseURL, "MCP_PUBLIC_URL": testPublicURL}
 			maps.Copy(env, tt.env)
 
 			got, err := load(func(k string) string { return env[k] })
@@ -82,7 +98,7 @@ func TestLoad(t *testing.T) {
 				t.Fatalf("load() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
-			if !tt.wantErr && got != tt.want {
+			if !tt.wantErr && !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("load() = %+v, want %+v", got, tt.want)
 			}
 		})

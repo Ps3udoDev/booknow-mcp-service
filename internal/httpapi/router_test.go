@@ -25,7 +25,7 @@ func (p *fakePinger) Ping(ctx context.Context) error {
 func TestHealthz(t *testing.T) {
 	t.Parallel()
 
-	router := NewRouter(slog.New(slog.DiscardHandler), &fakePinger{})
+	router := NewRouter(slog.New(slog.DiscardHandler), Deps{DB: &fakePinger{}})
 
 	tests := []struct {
 		name       string
@@ -73,7 +73,7 @@ func TestReadyz(t *testing.T) {
 			t.Parallel()
 
 			pinger := &fakePinger{err: tt.pingErr}
-			router := NewRouter(slog.New(slog.DiscardHandler), pinger)
+			router := NewRouter(slog.New(slog.DiscardHandler), Deps{DB: pinger})
 
 			req := httptest.NewRequestWithContext(t.Context(), tt.method, "/readyz", nil)
 			rec := httptest.NewRecorder()

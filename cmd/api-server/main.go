@@ -14,9 +14,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Ps3udoDev/booknow-mcp-service/internal/auth"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/config"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/httpapi"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/repository/postgres"
+	"github.com/Ps3udoDev/booknow-mcp-service/internal/tenant"
 )
 
 // Cloud Run sends SIGTERM and waits 10s before SIGKILL; leave margin.
@@ -54,11 +56,27 @@ func run() error {
 	// Closed after srv.Shutdown returns (defers run LIFO), so in-flight requests keep their connections.
 	defer pool.Close()
 
-	// WriteTimeout is intentionally generous; the MCP SSE route will need its own
-	// per-request deadline handling (http.ResponseController) instead of a short global limit.
+	// ctx (process lifetime) bounds the JWKS background refresh; a JWKS fetch failure aborts startup.
+	verifier, err := auth.NewVerifier(ctx, logger, cfg.SupabaseURL, cfg.JWTAudience)
+	if err != nil {
+		return fmt.Errorf("init token verifier: %w", err)
+	}
+
+	deps := httpapi.Deps{
+		DB: pool,
+		MCP: httpapi.MCPConfig{
+			PublicURL:           cfg.MCPPublicURL,
+			AuthorizationServer: auth.IssuerURL(cfg.SupabaseURL),
+			AllowedOrigins:      cfg.MCPAllowedOrigins,
+			Tokens:              verifier,
+			Access:              tenant.NewResolver(postgres.NewMCPAccessStore(pool)),
+		},
+	}
+
+	// /mcp is stateless and answers with JSON (no long-lived SSE stream), so regular timeouts are safe.
 	srv := &http.Server{
 		Addr:              net.JoinHostPort("", strconv.Itoa(cfg.Port)),
-		Handler:           httpapi.NewRouter(logger, pool),
+		Handler:           httpapi.NewRouter(logger, deps),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,

@@ -20,9 +20,16 @@ type Pinger interface {
 	Ping(ctx context.Context) error
 }
 
+// Deps are the collaborators the HTTP layer needs.
+type Deps struct {
+	DB Pinger
+	// MCP mounts /mcp and its OAuth metadata when Tokens and Access are set.
+	MCP MCPConfig
+}
+
 // NewRouter builds the root handler.
-// Route groups to add as features land: /v1 (REST), /webhooks/twilio, /mcp (Streamable HTTP).
-func NewRouter(logger *slog.Logger, db Pinger) http.Handler {
+// Route groups to add as features land: /v1 (REST), /webhooks/twilio.
+func NewRouter(logger *slog.Logger, deps Deps) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -30,7 +37,11 @@ func NewRouter(logger *slog.Logger, db Pinger) http.Handler {
 	r.Use(requestLogger(logger))
 
 	r.Get("/healthz", healthz)
-	r.Get("/readyz", readyz(logger, db))
+	r.Get("/readyz", readyz(logger, deps.DB))
+
+	if deps.MCP.Tokens != nil && deps.MCP.Access != nil {
+		mountMCP(r, logger, deps.MCP)
+	}
 
 	return r
 }

@@ -54,7 +54,7 @@ type supabaseClaims struct {
 // It fails if the JWKS cannot be fetched, so a wrong SUPABASE_URL is caught at startup.
 // ctx bounds the background JWKS refresh goroutine: pass the process lifetime context.
 func NewVerifier(ctx context.Context, logger *slog.Logger, supabaseURL, audience string) (*Verifier, error) {
-	issuer := strings.TrimRight(supabaseURL, "/") + "/auth/v1"
+	issuer := IssuerURL(supabaseURL)
 	jwksURL := issuer + "/.well-known/jwks.json"
 
 	failOnFirstFetch := false
@@ -85,6 +85,11 @@ func NewVerifier(ctx context.Context, logger *slog.Logger, supabaseURL, audience
 	)
 
 	return &Verifier{keys: keys, parser: parser}, nil
+}
+
+// IssuerURL returns the Supabase Auth issuer (the OAuth authorization server) for a project URL.
+func IssuerURL(supabaseURL string) string {
+	return strings.TrimRight(supabaseURL, "/") + "/auth/v1"
 }
 
 // Verify checks signature, algorithm, iss, aud, exp, nbf and iat, plus Supabase-specific claims.
