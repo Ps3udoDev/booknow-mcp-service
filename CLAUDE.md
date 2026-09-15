@@ -36,10 +36,12 @@ internal/config/       carga y validación de env vars
 internal/httpapi/      router chi, middleware, handlers (solo transporte); /healthz (liveness) y /readyz (ping a Postgres)
 internal/repository/postgres/  pgxpool (NewPool: ping al arrancar, límites de conexiones)
 internal/auth/         verificación JWT de Supabase (ES256 vía JWKS, iss/aud/exp/nbf/iat, kid obligatorio) y extracción Bearer
+internal/tenant/       autorización MCP: conexión activa exacta (usuario, client_id) + tenant activo + rol owner|admin|manager + módulo business-mcp; sin caché
+internal/repository/postgres/mcp_access.go  consulta de esa autorización (DBTX: pool o tx)
 ```
 
 Paquetes previstos (créalos cuando haya código real, no antes):
-`internal/tenant` (resolución de contexto/roles), `internal/mcp` (server + tools),
+`internal/mcp` (server + tools),
 `internal/application/<dominio>` (casos de uso: appointments, customers, analytics, drafts),
 `internal/integration/{twilio,resend}`, `internal/platform/{audit,pii}`.
 
