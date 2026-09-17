@@ -22,6 +22,7 @@ import (
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/auth"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/config"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/httpapi"
+	"github.com/Ps3udoDev/booknow-mcp-service/internal/integration/twilio"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/mcpserver"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/platform/ratelimit"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/repository/postgres"
@@ -89,6 +90,15 @@ func run() error {
 				Logger:   logger,
 			},
 		},
+	}
+
+	if cfg.TwilioAuthToken != "" {
+		validator, err := twilio.NewValidator(cfg.TwilioAuthToken, cfg.TwilioWebhookURL)
+		if err != nil {
+			return fmt.Errorf("init twilio webhook: %w", err)
+		}
+
+		deps.Twilio = httpapi.TwilioConfig{Validator: validator, AccountSID: cfg.TwilioAccountSID}
 	}
 
 	// /mcp is stateless and answers with JSON (no long-lived SSE stream), so regular timeouts are safe.

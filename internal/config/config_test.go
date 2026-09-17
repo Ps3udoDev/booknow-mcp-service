@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	testDatabaseURL = "postgres://user:secret@localhost:5432/postgres"
-	testSupabaseURL = "https://abc.supabase.co"
-	testPublicURL   = "https://mcp.booknow.app"
+	testDatabaseURL      = "postgres://user:secret@localhost:5432/postgres"
+	testSupabaseURL      = "https://abc.supabase.co"
+	testPublicURL        = "https://mcp.booknow.app"
+	testTwilioAccountSID = "AC0123456789abcdef0123456789abcdef"
 )
 
 func TestLoad(t *testing.T) {
@@ -52,13 +53,17 @@ func TestLoad(t *testing.T) {
 		},
 		{
 			name: "twilio webhook configured",
-			env:  map[string]string{"TWILIO_AUTH_TOKEN": " secreto ", "TWILIO_WEBHOOK_URL": " https://mcp.booknow.app/webhooks/twilio "},
+			env: map[string]string{
+				"TWILIO_AUTH_TOKEN": " secreto ", "TWILIO_WEBHOOK_URL": " https://mcp.booknow.app/webhooks/twilio ",
+				"TWILIO_ACCOUNT_SID": " " + testTwilioAccountSID + " ",
+			},
 			want: Config{
 				Port: 8080, Env: EnvDevelopment, LogLevel: slog.LevelInfo,
 				DatabaseURL: testDatabaseURL, DBMaxConns: 5,
 				SupabaseURL: testSupabaseURL, JWTAudience: "authenticated",
 				MCPPublicURL: testPublicURL, MCPRateLimitPerMinute: 60, MCPDraftTTL: 10 * time.Minute,
 				TwilioAuthToken: "secreto", TwilioWebhookURL: "https://mcp.booknow.app/webhooks/twilio",
+				TwilioAccountSID: testTwilioAccountSID,
 			},
 		},
 		{
@@ -104,6 +109,8 @@ func TestLoad(t *testing.T) {
 		{name: "twilio token without url", env: map[string]string{"TWILIO_AUTH_TOKEN": "secreto"}, wantErr: true},
 		{name: "twilio url without token", env: map[string]string{"TWILIO_WEBHOOK_URL": "https://mcp.booknow.app/webhooks/twilio"}, wantErr: true},
 		{name: "twilio url without path", env: map[string]string{"TWILIO_AUTH_TOKEN": "secreto", "TWILIO_WEBHOOK_URL": "https://mcp.booknow.app"}, wantErr: true},
+		{name: "twilio webhook without account sid", env: map[string]string{"TWILIO_AUTH_TOKEN": "secreto", "TWILIO_WEBHOOK_URL": "https://mcp.booknow.app/webhooks/twilio"}, wantErr: true},
+		{name: "twilio malformed account sid", env: map[string]string{"TWILIO_AUTH_TOKEN": "secreto", "TWILIO_WEBHOOK_URL": "https://mcp.booknow.app/webhooks/twilio", "TWILIO_ACCOUNT_SID": "SM0123456789abcdef0123456789abcdef"}, wantErr: true},
 		{name: "twilio url not absolute", env: map[string]string{"TWILIO_AUTH_TOKEN": "secreto", "TWILIO_WEBHOOK_URL": "/webhooks/twilio"}, wantErr: true},
 		{name: "http twilio url outside development", env: map[string]string{"APP_ENV": "production", "MCP_PUBLIC_URL": "https://mcp.booknow.app", "TWILIO_AUTH_TOKEN": "secreto", "TWILIO_WEBHOOK_URL": "http://mcp.booknow.app/webhooks/twilio"}, wantErr: true},
 		{name: "invalid draft ttl", env: map[string]string{"MCP_DRAFT_TTL_MINUTES": "diez"}, wantErr: true},

@@ -197,7 +197,7 @@ Ambas anotadas como escritura no destructiva e idempotente, auditadas con riesgo
 > **Traspaso:** `docs/handoff/fase7/` tiene el plan por tareas (7.1–7.9), lo que debe configurar el usuario en Twilio/WhatsApp/Resend, las decisiones abiertas y un informe por tarea en `docs/handoff/fase7/reportes/`.
 
 - [x] **7.1** `internal/integration/twilio`: firma HMAC-SHA1 sobre la URL configurada y los campos del formulario, comparación en tiempo constante, `TWILIO_AUTH_TOKEN` + `TWILIO_WEBHOOK_URL` validadas juntas y sin filtrarse en errores. Fuzzing (1,7 M) y 6 mutaciones detectadas. Informe: `docs/handoff/fase7/reportes/7.1-verificacion-firma-twilio.md`.
-- [ ] **7.2** Endpoint `POST /webhooks/twilio`: verificar la firma **antes** de parsear el body original; 403 si no cuadra; 200 rápido; logs sin body ni teléfonos.
+- [x] **7.2** Endpoint `POST /webhooks/twilio`: content type, cuerpo ≤ 64 KiB, firma sobre el cuerpo original y `AccountSid` (nueva `TWILIO_ACCOUNT_SID` obligatoria) antes de leer campos; 403 sin detalles; TwiML vacío; 500 si falla el procesador para que Twilio reintente; logs solo con `MessageSid`. 6 mutaciones detectadas. Informe: `docs/handoff/fase7/reportes/7.2-endpoint-webhook-twilio.md`.
 - [ ] ⚠️ Resolución de tenant en el webhook (p. ej. por número destino `To` o por la cita notificada), nunca por teléfono global.
 - [ ] ⚠️ Deduplicación persistente por `MessageSid` (tabla nueva → migración en el repo Next.js).
 - [ ] Parser de intención por palabra completa y normalizada (tildes, mayúsculas), con tests table-driven y fuzzing.

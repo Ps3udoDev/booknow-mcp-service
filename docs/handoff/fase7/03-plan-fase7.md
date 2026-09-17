@@ -16,7 +16,7 @@ Entregables:
 - Variables `TWILIO_AUTH_TOKEN` y `TWILIO_WEBHOOK_URL` en `internal/config` (obligatorias solo si el webhook está activo).
 - Tests con vector oficial de Twilio, cuerpo alterado, parámetro añadido o quitado, token incorrecto, firma vacía o mal codificada, y fuzzing.
 
-## 7.2 — Endpoint `POST /webhooks/twilio`
+## 7.2 — Endpoint `POST /webhooks/twilio` ✅ hecha (ver `reportes/7.2-endpoint-webhook-twilio.md`)
 
 Entregables:
 - Handler en `internal/httpapi` que lee el cuerpo **original** con límite (64 KiB), **verifica la firma antes de parsear** y responde 403 sin detalles si no cuadra.
