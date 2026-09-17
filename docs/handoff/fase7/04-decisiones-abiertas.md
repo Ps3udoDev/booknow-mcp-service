@@ -30,9 +30,10 @@ join public.customers c
 where n.channel = 'whatsapp'
   and n.recipient_type = 'customer'
   and n.reference_type = 'appointment'
+  and n.notification_type <> 'appointment_response' -- las respuestas registradas no son envíos
   and n.status in ('sent', 'delivered', 'read')
   and n.created_at > now() - ($2::interval)          -- ventana, 48 h
-  and c.phone_country_code || c.phone = $1           -- E.164 normalizado
+  and c.phone_country_code || regexp_replace(c.phone, '\D', '', 'g') = $1  -- E.164 normalizado
 order by n.created_at desc
 limit 1;
 ```

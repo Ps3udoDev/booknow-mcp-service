@@ -27,7 +27,7 @@ Entregables:
 
 Criterio de aceptación: sin `TWILIO_AUTH_TOKEN` configurado, la ruta no se registra (o responde 503), nunca procesa sin validar.
 
-## 7.3 — 🔒 Migración: tabla de eventos de Twilio (repo Next.js)
+## 7.3 — 🔒 Migración: tabla de eventos de Twilio (repo Next.js) — SQL listo, pendiente de aplicar (ver `reportes/7.3-migracion-twilio.md`; el diseño final usa una función `SECURITY DEFINER` en vez de `UPDATE` directo)
 
 Entregables en este repo (no se aplica aquí):
 - `docs/handoff/sql/twilio_webhook_events.sql` con la tabla y los permisos mínimos para `booknow_mcp_service`.

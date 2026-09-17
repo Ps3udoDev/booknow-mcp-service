@@ -34,7 +34,8 @@ Estado del proyecto: Fases 1–6 hechas (MCP completo, tools de lectura y escrit
 Las decisiones ya están cerradas (`04-decisiones-abiertas.md`), así que el único bloqueo que queda es
 la migración de 7.3.
 
-- **7.1** y **7.2** ✅ hechas.
+- **7.1** y **7.2** ✅ hechas. **7.3**: SQL listo y validado, pendiente de que lo aplique Next.js
+  (`docs/handoff/nextjs-migracion-fase7-twilio.md`). D13 en `docs/handoff/nextjs-fase7-arreglo-webhook-twilio.md`.
 - **7.5** no depende de nada externo: se puede hacer ya. 7.5 sube de posición porque D9
   fijó los payloads de los botones (`CONFIRM` / `CANCEL`) y ya no necesita nada más.
 - **7.3** produce el SQL, pero **lo aplica el repo Next.js**. Todo lo que hay de 7.4 en adelante
