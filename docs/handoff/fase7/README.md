@@ -11,7 +11,8 @@ Estado del proyecto: Fases 1–6 hechas (MCP completo, tools de lectura y escrit
 | `01-configuracion-twilio-whatsapp.md` | 🔒 el usuario | Qué hay que crear y configurar en Twilio, Meta/WhatsApp y Resend, y qué datos entregar (sin secretos en el repo). |
 | `02-bugs-produccion-twilio.md` | 🔒 el usuario + agente del repo Next.js | Los 5 fallos del webhook actual en producción y cómo mitigarlos ya, antes de que Go lo reemplace. |
 | `03-plan-fase7.md` | el agente que implemente | Desglose en tareas 7.1–7.9 con entregables, criterios de aceptación y tests. |
-| `04-decisiones-abiertas.md` | 🔒 el usuario | Decisiones que bloquean tareas concretas (sobre todo D8: cómo se resuelve el negocio de un mensaje entrante). |
+| `04-decisiones-abiertas.md` | todos | ✅ **CERRADO el 2026-09-15.** Lo decidido en D8–D14 y las reglas que se derivan. Contrato de las tareas 7.4, 7.6 y 7.7. |
+| `05-alta-tenant-dev-test.md` | 🔒 el usuario | Cómo dar de alta el tenant de pruebas `dev-test` (decisión D14). |
 | `plantilla-reporte-task.md` | el agente que implemente | Plantilla del informe que deja cada tarea. |
 | `reportes/` | todos | Un `.md` por tarea terminada. |
 
@@ -28,9 +29,18 @@ Estado del proyecto: Fases 1–6 hechas (MCP completo, tools de lectura y escrit
 
 ## Orden recomendado
 
-`7.1 → 7.2 → 7.3 (🔒 migración) → 7.4 → 7.5 → 7.6 → 7.7 → 7.8 → 7.9`
+`7.1 → 7.2 → 7.5 → 7.3 (🔒 migración) → 7.4 → 7.6 → 7.7 → 7.8 → 7.9`
 
-7.1, 7.2 y 7.5 no dependen de nada externo y se pueden hacer ya. 7.3 en adelante necesitan que el usuario responda `04-decisiones-abiertas.md` y que se aplique la migración.
+Las decisiones ya están cerradas (`04-decisiones-abiertas.md`), así que el único bloqueo que queda es
+la migración de 7.3.
+
+- **7.1** ✅ hecha.
+- **7.2** y **7.5** no dependen de nada externo: se pueden hacer ya. 7.5 sube de posición porque D9
+  fijó los payloads de los botones (`CONFIRM` / `CANCEL`) y ya no necesita nada más.
+- **7.3** produce el SQL, pero **lo aplica el repo Next.js**. Todo lo que hay de 7.4 en adelante
+  espera a que esté aplicado.
+- **7.7** y **7.8** se implementan y prueban en esta fase, pero el corte real de Next.js a Go no
+  ocurre hasta la Fase 9 (ver D10).
 
 ## Contexto técnico que ya existe y conviene reutilizar
 
