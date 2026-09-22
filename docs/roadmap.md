@@ -242,7 +242,7 @@ si `TWILIO_AUTH_TOKEN` y `TWILIO_WEBHOOK_URL` están vacías la ruta `/webhooks/
 | D3 | Varias conexiones activas del mismo cliente en distintos tenants | Gana la de `updated_at` más reciente (último consentimiento); el TS usaba `created_at`. | ✅ Confirmado |
 | D4 | Tenants en `trial` | Sin acceso, solo `active` (paridad TS). | Implementado; confirmar si es lo deseado |
 | D5 | Scopes / quién usa el MCP | v1: solo personal (`owner`, `admin`, `manager`), autorizado por rol; sin scopes por tool (Supabase no emite scopes propios). Clientes finales y asistente de la landing → fases v2 con un MCP separado. | ✅ Confirmado |
-| D6 | `MCP_ALLOWED_ROLES` en `.env.example` | Roles fijos en código (`owner`, `admin`, `manager`); eliminar la variable. | Pendiente |
+| D6 | `MCP_ALLOWED_ROLES` en `.env.example` | Roles fijos en código (`owner`, `admin`, `manager`); variable eliminada, junto con `MCP_AUDIT_RETENTION_DAYS` (la retención la aplica la función SQL). | ✅ Hecho |
 | D7 | Rate limiting multi-instancia | En memoria por instancia, 60 llamadas/min por conexión; peor caso = límite × `max-instances`. Cloud Armor por IP como capa opcional en la Fase 9. | ✅ Confirmado |
 | D9 | Pooler de Supabase en producción | Session Pooler (5432) con el rol `booknow_mcp_service`. | ✅ Validado con el smoke test |
 | D11 | Purga de auditoría MCP | `pg_cron` en Supabase con `purge_mcp_tool_calls()`; el rol del servicio no puede borrar. | ✅ Aplicado en producción (job diario 03:17 UTC) |
