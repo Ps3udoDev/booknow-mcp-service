@@ -24,6 +24,7 @@ import (
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/httpapi"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/integration/twilio"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/mcpserver"
+	"github.com/Ps3udoDev/booknow-mcp-service/internal/platform/logging"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/platform/ratelimit"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/repository/postgres"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/tenant"
@@ -48,7 +49,7 @@ func run() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	logger := logging.New(os.Stdout, cfg.LogLevel)
 	slog.SetDefault(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
