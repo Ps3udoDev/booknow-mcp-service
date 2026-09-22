@@ -22,7 +22,7 @@ Márcalo en el mismo commit que completa cada tarea.
 | 6. Escrituras en dos pasos (drafts) | ✅ hecho y validado contra producción (cita real creada por MCP) |
 | 7. Twilio WhatsApp (webhook y notificaciones) | ⏸️ aplazada → `docs/plan-twilio.md` (7.1–7.2 hechas) |
 | 8. Fallback REST `/api/actions/*` | ❌ descartada (D19) |
-| 9. Despliegue en Cloud Run | 🟡 staging y producción desplegados y validados, alertas y rollback probados; falta el dominio `mcp.agendia.store` |
+| 9. Despliegue en Cloud Run | ✅ staging y producción en `https://mcp.agendia.store`, alertas y rollback probado (SBOM/provenance y escaneo aplazados) |
 | 10. QA integral, corte y retirada de Next.js | ⬜ pendiente |
 
 ---
@@ -233,11 +233,12 @@ Runbook: **`docs/runbook-cloud-run.md`**. Manifiesto y scripts en `deploy/cloudr
 - [ ] Despliegue por digest ✅ (staging). Escaneo de imagen aplazado por coste (Container Scanning no activado, 2026-09-22). SBOM y provenance quedan para el pipeline con Workload Identity Federation.
 - [x] Alertas en producción (2026-09-22, `deploy/monitoring/apply.sh`, idempotente): 5xx, pico de 4xx, latencia p95, JWKS, Postgres y tools con error interno. Avisan a `v.pseudo.developer@gmail.com`. Sentry, más adelante.
 - [x] Rollback probado en staging (2026-09-22): tráfico devuelto a la revisión 00001, smoke en verde y vuelta a la última revisión.
-- [ ] 🔒 Dominio con HTTPS `mcp.agendia.store` (2026-09-22):
+- [x] 🔒 Dominio con HTTPS `mcp.agendia.store` (2026-09-22):
   - Hecho: `agendia.store` verificado en Search Console, CNAME en Cloudflare en Solo DNS y domain mapping creado por API REST.
   - Certificado emitido en ~13 min; el frontend tardó otros ~8 min en servirlo (hasta entonces, error en el handshake TLS).
   - Smoke por el dominio en verde.
-  - Falta redesplegar producción con `MCP_PUBLIC_URL=https://mcp.agendia.store`.
+  - Producción redesplegada con `MCP_PUBLIC_URL=https://mcp.agendia.store`: metadata y challenge 401 anuncian el dominio, y `smoke.sh` con token real da 17/17.
+  - Desde ahora los clientes MCP deben usar el dominio, no la URL `run.app`.
 - [x] 🔒 Producción `booknow-mcp` desplegada por el usuario el 2026-09-22 (pública, mismo digest que staging): `https://booknow-mcp-248015398241.us-west1.run.app`. `smoke.sh` con token OAuth real: 17/17. Probes en verde y logs sin tokens ni cadenas de conexión. Los clientes MCP siguen en Next.js hasta la Fase 10.
 
 ## Fases futuras (v2) — fuera del alcance actual
