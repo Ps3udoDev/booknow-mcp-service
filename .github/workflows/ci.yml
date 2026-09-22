@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Shellcheck deploy scripts
-        run: shellcheck deploy/cloudrun/*.sh
+        run: shellcheck deploy/cloudrun/*.sh deploy/monitoring/*.sh
 
       - name: Build production image
         run: DOCKER_BUILDKIT=1 docker build -t booknow-mcp:ci .

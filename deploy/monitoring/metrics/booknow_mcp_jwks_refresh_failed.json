@@ -1,0 +1,6 @@
+{
+  "name": "booknow_mcp_jwks_refresh_failed",
+  "description": "booknow-mcp: fallos al refrescar el JWKS de Supabase Auth",
+  "filter": "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=(\"booknow-mcp\" OR \"booknow-mcp-staging\") AND jsonPayload.message=\"jwks refresh failed\"",
+  "metricDescriptor": {"metricKind": "DELTA", "valueType": "INT64", "unit": "1"}
+}

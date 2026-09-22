@@ -1,0 +1,6 @@
+{
+  "name": "booknow_mcp_db_errors",
+  "description": "booknow-mcp: Postgres no responde (readiness o resolución de tenant)",
+  "filter": "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=(\"booknow-mcp\" OR \"booknow-mcp-staging\") AND jsonPayload.message=(\"readiness check failed\" OR \"mcp access resolution failed\")",
+  "metricDescriptor": {"metricKind": "DELTA", "valueType": "INT64", "unit": "1"}
+}

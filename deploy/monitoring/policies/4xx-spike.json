@@ -1,0 +1,35 @@
+{
+  "displayName": "booknow-mcp: pico de 401/403/429",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "más de 100 respuestas 4xx en 5 min",
+      "conditionThreshold": {
+        "filter": "resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${SERVICE}\" AND metric.type = \"run.googleapis.com/request_count\" AND metric.labels.response_code_class = \"4xx\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_SUM",
+            "crossSeriesReducer": "REDUCE_SUM"
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 100,
+        "duration": "0s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "notificationChannels": [
+    "${CHANNEL}"
+  ],
+  "alertStrategy": {
+    "autoClose": "1800s"
+  },
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "Muchas respuestas 4xx: tokens inválidos, accesos denegados (`mcp access denied`) o rate limit (`mcp rate limited`). Puede ser un cliente roto o un abuso.\n\nRunbook: docs/runbook-cloud-run.md (Observabilidad y Revertir)."
+  }
+}

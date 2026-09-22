@@ -128,7 +128,16 @@ El siguiente `services replace` vuelve a enviar el tráfico a la revisión nueva
 
 ## Observabilidad y alertas
 
-Los logs salen en JSON con `severity` y `message`, que Cloud Logging interpreta (`internal/platform/logging`). Alertas propuestas:
+Los logs salen en JSON con `severity` y `message`, que Cloud Logging interpreta (`internal/platform/logging`).
+Las alertas se versionan en `deploy/monitoring/` y se aplican con un script idempotente (API REST, sin `gcloud beta`):
+
+```bash
+PROJECT_ID=agendia-mcp ALERT_EMAIL=v.pseudo.developer@gmail.com SERVICE=booknow-mcp deploy/monitoring/apply.sh
+```
+
+Aplicado el 2026-09-22: 3 métricas basadas en logs, un canal de correo (`v.pseudo.developer@gmail.com`) y 6 políticas
+sobre el servicio de producción. Staging no avisa. Para cambiar una política ya creada, bórrala en la consola y vuelve a
+ejecutar el script (solo crea lo que falta). Sentry queda para más adelante.
 
 | Alerta | Fuente |
 |---|---|
@@ -139,7 +148,21 @@ Los logs salen en JSON con `severity` y `message`, que Cloud Logging interpreta 
 | Postgres no responde | métrica basada en logs: `jsonPayload.message="readiness check failed"` o `"mcp access resolution failed"` |
 | Tool con error interno | métrica basada en logs: `jsonPayload.message="mcp tool failed"` |
 
-## Pendiente (no bloquea el primer staging)
+## Dominio propio (`mcp.agendia.store`)
+
+`agendia.store` está en Cloudflare. El servicio usará el subdominio `mcp.agendia.store` con un domain mapping de Cloud Run
+(certificado gestionado por Google):
+
+1. 🔒 Verifica la propiedad de `agendia.store` con tu cuenta de Google: `gcloud domains verify agendia.store` abre
+   Search Console, que te da un registro TXT para añadir en Cloudflare en la raíz, con "Solo DNS". Comprueba después
+   que el dominio aparece en `gcloud domains list-user-verified`.
+2. Crea el mapping: `gcloud beta run domain-mappings create --service booknow-mcp --domain mcp.agendia.store --region us-west1`.
+3. 🔒 En Cloudflare, `CNAME mcp → ghs.googlehosted.com` en **Solo DNS** (nube gris): con el proxy de Cloudflare activo
+   Google no puede emitir el certificado. El certificado tarda de 15 minutos a unas horas.
+4. Cambia `MCP_PUBLIC_URL=https://mcp.agendia.store` en `production.env`, vuelve a generar el manifiesto, aplícalo y
+   ejecuta `smoke.sh https://mcp.agendia.store`.
+
+## Pendiente
 
 - Pipeline de despliegue (GitHub Actions con Workload Identity Federation) con SBOM y provenance. Hasta entonces se despliega a mano con este runbook.
 - Dominio propio con HTTPS: cuando exista, cambiar `MCP_PUBLIC_URL` en `production.env`.

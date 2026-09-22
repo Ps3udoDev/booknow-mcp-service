@@ -1,0 +1,35 @@
+{
+  "displayName": "booknow-mcp: latencia p95 alta",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "p95 por encima de 5 s durante 10 min",
+      "conditionThreshold": {
+        "filter": "resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${SERVICE}\" AND metric.type = \"run.googleapis.com/request_latencies\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_PERCENTILE_95",
+            "crossSeriesReducer": "REDUCE_MAX"
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 5000,
+        "duration": "600s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "notificationChannels": [
+    "${CHANNEL}"
+  ],
+  "alertStrategy": {
+    "autoClose": "1800s"
+  },
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "La latencia p95 supera 5 s. Suele deberse a Postgres o al pooler (conexiones agotadas); revisa `DB_MAX_CONNS` × instancias frente al Pool Size (15).\n\nRunbook: docs/runbook-cloud-run.md (Observabilidad y Revertir)."
+  }
+}

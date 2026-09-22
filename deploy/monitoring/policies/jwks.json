@@ -1,0 +1,35 @@
+{
+  "displayName": "booknow-mcp: fallo del JWKS de Supabase",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "algún fallo al refrescar el JWKS en 5 min",
+      "conditionThreshold": {
+        "filter": "resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${SERVICE}\" AND metric.type = \"logging.googleapis.com/user/booknow_mcp_jwks_refresh_failed\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_SUM",
+            "crossSeriesReducer": "REDUCE_SUM"
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "notificationChannels": [
+    "${CHANNEL}"
+  ],
+  "alertStrategy": {
+    "autoClose": "1800s"
+  },
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "No se pudo refrescar el JWKS de Supabase Auth. Los tokens firmados con claves nuevas se rechazarán hasta que se recupere.\n\nRunbook: docs/runbook-cloud-run.md (Observabilidad y Revertir)."
+  }
+}
