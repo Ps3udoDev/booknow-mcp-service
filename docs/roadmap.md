@@ -22,7 +22,7 @@ Márcalo en el mismo commit que completa cada tarea.
 | 6. Escrituras en dos pasos (drafts) | ✅ hecho y validado contra producción (cita real creada por MCP) |
 | 7. Twilio WhatsApp (webhook y notificaciones) | ⏸️ aplazada → `docs/plan-twilio.md` (7.1–7.2 hechas) |
 | 8. Fallback REST `/api/actions/*` | ⬜ pendiente |
-| 9. Despliegue en Cloud Run | ⬜ pendiente |
+| 9. Despliegue en Cloud Run | 🟡 preparado en el repo; falta el proyecto GCP (🔒) |
 | 10. QA integral, corte y retirada de Next.js | ⬜ pendiente |
 
 ---
@@ -202,15 +202,23 @@ si `TWILIO_AUTH_TOKEN` y `TWILIO_WEBHOOK_URL` están vacías la ruta `/webhooks/
 
 ## Fase 9 — Despliegue en Cloud Run
 
-- [ ] 🔒 Proyecto GCP, Artifact Registry y cuenta de servicio de runtime por entorno con permisos mínimos.
-- [ ] 🔒 Secretos en Secret Manager con versiones fijadas: `DATABASE_URL` (los de Twilio y Resend, en `docs/plan-twilio.md`).
-- [ ] Conectividad a Supabase: Session Pooler (IPv4) o conexión directa (IPv6).
-- [ ] `max_instances × DB_MAX_CONNS` dentro del límite de conexiones del plan de Supabase.
-- [ ] Startup probe a `/readyz` y liveness a `/healthz` (la liveness no depende de la base).
-- [ ] Concurrencia, timeout de request compatible con SSE y máximo de instancias.
-- [ ] Staging privado; smoke tests por digest.
-- [ ] Imagen escaneada, SBOM y provenance; despliegue por digest.
-- [ ] Logs JSON en Cloud Logging y alertas de 401/403/429/5xx, latencia y fallos de JWKS.
+Runbook: **`docs/runbook-cloud-run.md`**. Manifiesto y scripts en `deploy/cloudrun/`. Lo marcado como "preparado" está en el repo y verificado en local, pero todavía no en GCP.
+
+- [x] Preparado en el repo:
+  - `service.yaml` declarativo y `render.sh`, que exige imagen por digest, rechaza `<placeholders>` y lee el `.env` como datos, sin ejecutarlo.
+  - Valores de staging y producción sin secretos; `smoke.sh` de solo lectura.
+  - CI con ShellCheck y build de la imagen.
+- [x] Imagen de producción verificada en local contra Supabase local: respeta `$PORT`, corre como `nonroot`, apagado limpio con SIGTERM, `/webhooks/twilio` no se sirve sin configuración, `smoke.sh` pasa. Con `APP_ENV=staging` arranca contra el JWKS de producción.
+- [x] Logs con `severity`/`message` para Cloud Logging (`internal/platform/logging`). Con `level`/`msg`, todas las entradas quedaban sin severidad y no se podía alertar por errores. 3 mutaciones detectadas.
+- [ ] 🔒 Proyecto GCP, Artifact Registry y cuenta de servicio de runtime con permisos mínimos (comandos en el runbook, "Preparación única").
+- [ ] 🔒 Secretos en Secret Manager con versiones fijadas: `DATABASE_URL` por entorno (los de Twilio y Resend, en `docs/plan-twilio.md`).
+- [ ] Conectividad a Supabase: Session Pooler (IPv4) con `booknow_mcp_service`, ya validado desde local (D9); falta desde Cloud Run.
+- [ ] 🔒 `max_instances × DB_MAX_CONNS` dentro del pool: propuesta 1×2 (staging) + 3×4 (producción) = 14. Falta confirmar el Pool Size del Session Pooler en el panel de Supabase.
+- [ ] Startup probe a `/readyz` y liveness a `/healthz`: preparadas en `service.yaml`; falta verlas en Cloud Run.
+- [ ] Concurrencia 40, timeout 60 s (sin SSE) y máximo de instancias: preparados; falta verlos en Cloud Run.
+- [ ] Staging privado (IAM + `X-Serverless-Authorization`) y smoke por digest. La parte MCP de `smoke.sh` (con token OAuth) no se ha probado: el token de `.env.smoke` estaba caducado.
+- [ ] Imagen escaneada (Artifact Registry) y despliegue por digest: preparados. SBOM y provenance quedan para el pipeline con Workload Identity Federation.
+- [ ] Alertas de 401/403/429/5xx, latencia, JWKS y Postgres (filtros en el runbook).
 - [ ] Rollback probado.
 - [ ] 🔒 Dominio con HTTPS.
 
