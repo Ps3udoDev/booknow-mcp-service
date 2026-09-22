@@ -8,6 +8,7 @@ Márcalo en el mismo commit que completa cada tarea.
 **Fuentes:** `migracion/specs/*` (comportamiento), `migracion/docs/guia-migracion-next-scp-go-cloud-run.md` (fases y checklist de producción), `migracion/docs/seguridad-backend-go-cloud-run.md`, `CLAUDE.md` (reglas no negociables).
 
 > La numeración sigue la guía de migración, pero el orden se ajustó a la prioridad del proyecto: primero MCP (Fases 4–6), luego Twilio (7) y el fallback REST (8). La guía proponía REST → webhooks → MCP.
+> Desde el 2026-09-21 el foco es **terminar la migración del MCP** (Fases 8–10 sin Twilio); Twilio sigue en `docs/plan-twilio.md`.
 
 ## Resumen
 
@@ -19,7 +20,7 @@ Márcalo en el mismo commit que completa cada tarea.
 | 4. Endpoint `/mcp` y seguridad de transporte | ✅ hecho y validado contra producción (solo falta `last_used_at`, que requiere permiso) |
 | 5. Plataforma transversal y tools de lectura | ✅ hecho y validado contra producción |
 | 6. Escrituras en dos pasos (drafts) | ✅ hecho y validado contra producción (cita real creada por MCP) |
-| 7. Twilio WhatsApp (webhook y notificaciones) | ⬜ pendiente |
+| 7. Twilio WhatsApp (webhook y notificaciones) | ⏸️ aplazada → `docs/plan-twilio.md` (7.1–7.2 hechas) |
 | 8. Fallback REST `/api/actions/*` | ⬜ pendiente |
 | 9. Despliegue en Cloud Run | ⬜ pendiente |
 | 10. QA integral, corte y retirada de Next.js | ⬜ pendiente |
@@ -185,27 +186,11 @@ Ambas anotadas como escritura no destructiva e idempotente, auditadas con riesgo
 - [x] ⚠️ Zona horaria de Elvis Studio corregida: la sucursal Tariba (Venezuela) tenía `America/Guayaquil` y ofrecía horarios con una hora de desfase. Script ejecutado por el usuario en el SQL Editor: `docs/handoff/sql/fix_elvis_studio_tariba_timezone.sql` (6 horarios activos, 0 citas futuras afectadas). Ambas sucursales quedan en `America/Caracas`.
 - [ ] Revisar las citas `mcp` en el panel de Next.js (etiqueta de `source`) antes de exponer las tools a usuarios reales.
 
-## Fase 7 — Twilio WhatsApp
+## Fase 7 — Twilio WhatsApp ⏸️ aplazada
 
-> ⚠️ **Hallazgos en el código TS actual** (`migracion/twilio-whatsapp/`), relevantes también para producción hoy:
-> 1. `twilio-webhook-route.ts` **no verifica `X-Twilio-Signature`**: cualquiera puede enviar un POST con un `From` falso y confirmar o cancelar citas.
-> 2. Busca el cliente por los últimos 10 dígitos del teléfono **en todos los tenants** y modifica la cita más reciente de cualquiera de ellos.
-> 3. Detecta la intención con `includes` sobre subcadenas (`"no"` coincide con `"buenos"`, `"si"` con `"casi"`).
-> 4. No deduplica reintentos de Twilio.
-> 5. En el archivo copiado, `notify-route.ts` no autentica al llamador. Hay que confirmar si el middleware de Next.js lo protege. Además, interpola datos sin escapar en el HTML de los emails.
-
-> **Traspaso:** `docs/handoff/fase7/` tiene el plan por tareas (7.1–7.9), lo que debe configurar el usuario en Twilio/WhatsApp/Resend, las decisiones abiertas y un informe por tarea en `docs/handoff/fase7/reportes/`.
-
-- [x] **7.1** `internal/integration/twilio`: firma HMAC-SHA1 sobre la URL configurada y los campos del formulario, comparación en tiempo constante, `TWILIO_AUTH_TOKEN` + `TWILIO_WEBHOOK_URL` validadas juntas y sin filtrarse en errores. Fuzzing (1,7 M) y 6 mutaciones detectadas. Informe: `docs/handoff/fase7/reportes/7.1-verificacion-firma-twilio.md`.
-- [x] **7.2** Endpoint `POST /webhooks/twilio`: content type, cuerpo ≤ 64 KiB, firma sobre el cuerpo original y `AccountSid` (nueva `TWILIO_ACCOUNT_SID` obligatoria) antes de leer campos; 403 sin detalles; TwiML vacío; 500 si falla el procesador para que Twilio reintente; logs solo con `MessageSid`. 6 mutaciones detectadas. Informe: `docs/handoff/fase7/reportes/7.2-endpoint-webhook-twilio.md`.
-- [ ] ⚠️ Resolución de tenant en el webhook (p. ej. por número destino `To` o por la cita notificada), nunca por teléfono global.
-- [ ] ⚠️ **7.3** Deduplicación persistente por `MessageSid` y aplicación de respuestas: SQL listo y validado en local (83 checks + concurrencia): tabla `twilio_webhook_events`, función `apply_twilio_whatsapp_reply` (`SECURITY DEFINER`, sin `UPDATE` directo en `appointments`) y permisos de `notifications` y datos de avisos. **Pendiente de aplicar por el repo Next.js** (`docs/handoff/nextjs-migracion-fase7-twilio.md`). Informe: `docs/handoff/fase7/reportes/7.3-migracion-twilio.md`.
-- [ ] Parser de intención por palabra completa y normalizada (tildes, mayúsculas), con tests table-driven y fuzzing.
-- [ ] Caso de uso: confirmar o cancelar la cita del cliente en el tenant resuelto y registrar en `notifications`.
-- [ ] Respuesta 200 rápida; trabajo costoso fuera del request si hace falta.
-- [ ] Notificaciones salientes (`notify`): autenticación del llamador, WhatsApp con `TWILIO_CONTENT_SID` o fallback, email vía Resend (`internal/integration/resend`) con HTML escapado y `.ics`.
-- [ ] Tests: firma válida, firma alterada, reintento duplicado, cliente en dos tenants, intención ambigua, timeout del proveedor.
-- [ ] ⚠️ `campaigns-send-route.ts` es un stub: decidir si se migra.
+Separada del camino crítico el 2026-09-21: pagos y número de WhatsApp del SaaS se definen en una reunión con el equipo.
+Plan, checklist y decisiones de Twilio en **`docs/plan-twilio.md`**. Lo ya hecho (7.1 firma, 7.2 endpoint) queda en `main`:
+si `TWILIO_AUTH_TOKEN` y `TWILIO_WEBHOOK_URL` están vacías la ruta `/webhooks/twilio` no se sirve, así que no bloquea desplegar el MCP.
 
 ## Fase 8 — Fallback REST `/api/actions/*`
 
@@ -218,7 +203,7 @@ Ambas anotadas como escritura no destructiva e idempotente, auditadas con riesgo
 ## Fase 9 — Despliegue en Cloud Run
 
 - [ ] 🔒 Proyecto GCP, Artifact Registry y cuenta de servicio de runtime por entorno con permisos mínimos.
-- [ ] 🔒 Secretos en Secret Manager con versiones fijadas: `DATABASE_URL`, `TWILIO_AUTH_TOKEN`, `RESEND_API_KEY`.
+- [ ] 🔒 Secretos en Secret Manager con versiones fijadas: `DATABASE_URL` (los de Twilio y Resend, en `docs/plan-twilio.md`).
 - [ ] Conectividad a Supabase: Session Pooler (IPv4) o conexión directa (IPv6).
 - [ ] `max_instances × DB_MAX_CONNS` dentro del límite de conexiones del plan de Supabase.
 - [ ] Startup probe a `/readyz` y liveness a `/healthz` (la liveness no depende de la base).
@@ -242,8 +227,8 @@ Ambas anotadas como escritura no destructiva e idempotente, auditadas con riesgo
 - [ ] QA: OAuth aprobado, denegado y expirado; conexión revocada; módulo deshabilitado; scope faltante; aislamiento cross-tenant; PII enmascarada; auditoría sin secretos; drafts con reintento y expiración; confirmación concurrente.
 - [ ] Comparar métricas, errores y latencia entre Go y Next.js.
 - [ ] 🔒 Revocar la conexión MCP activa con `client_id` legacy (`unknown_client`/`mcp-client`): inventario del 2026-09-15 → 3 conexiones activas válidas en Go y 1 legacy que dejará de funcionar.
-- [ ] 🔒 Cambiar clientes MCP y el webhook de Twilio a la URL de Go (sin cambiar a la vez URL, proveedor y semántica).
-- [ ] Retirar de Next.js: `src/lib/mcp/`, `src/lib/capabilities/`, `src/app/api/mcp/`, `src/app/api/actions/`, `src/app/api/webhooks/twilio/`.
+- [ ] 🔒 Cambiar los clientes MCP a la URL de Go (sin cambiar a la vez URL, proveedor y semántica). El webhook de Twilio, en `docs/plan-twilio.md`.
+- [ ] Retirar de Next.js: `src/lib/mcp/`, `src/lib/capabilities/`, `src/app/api/mcp/`, `src/app/api/actions/` (`src/app/api/webhooks/twilio/` se retira con el plan de Twilio).
 - [ ] Handoff: guía de conexión (MCP Inspector y un host real), inventario de tools y scopes, runbooks de revocación y de desactivación del módulo, variables documentadas sin valores, resultados de QA y pendientes de v2.
 
 ---
@@ -259,14 +244,10 @@ Ambas anotadas como escritura no destructiva e idempotente, auditadas con riesgo
 | D5 | Scopes / quién usa el MCP | v1: solo personal (`owner`, `admin`, `manager`), autorizado por rol; sin scopes por tool (Supabase no emite scopes propios). Clientes finales y asistente de la landing → fases v2 con un MCP separado. | ✅ Confirmado |
 | D6 | `MCP_ALLOWED_ROLES` en `.env.example` | Roles fijos en código (`owner`, `admin`, `manager`); eliminar la variable. | Pendiente |
 | D7 | Rate limiting multi-instancia | En memoria por instancia, 60 llamadas/min por conexión; peor caso = límite × `max-instances`. Cloud Armor por IP como capa opcional en la Fase 9. | ✅ Confirmado |
-| D8 | Deduplicación y resolución de tenant en Twilio | Tabla de eventos procesados (`message_sid` único) + tenant resuelto **por la notificación enviada** en una ventana de 48 h; si hay más de un tenant en la ventana → `unresolved`, no se toca nada. Un número por tenant queda para más adelante. Requiere migración en Next.js. | ✅ Confirmado (ver `docs/handoff/fase7/04-decisiones-abiertas.md`) |
 | D9 | Pooler de Supabase en producción | Session Pooler (5432) con el rol `booknow_mcp_service`. | ✅ Validado con el smoke test |
-| D10 | Hallazgos de seguridad del webhook Twilio en producción actual | Arreglar **B1 + B2 + B3 ya en Next.js** (el webhook está implementado pero no se usa, así que el cambio es inocuo y permite borrar ese código al migrar). B4, B5 y B7 los cubre Go. Antes de tocar, el repo Next.js verifica que el webhook no esté en uso. | ✅ Confirmado (ver `docs/handoff/fase7/04-decisiones-abiertas.md`) |
 | D11 | Purga de auditoría MCP | `pg_cron` en Supabase con `purge_mcp_tool_calls()`; el rol del servicio no puede borrar. | ✅ Aplicado en producción (job diario 03:17 UTC) |
 | D12 | Retención de `mcp_appointment_drafts` (guarda `customer_notes` del LLM) | Purgar borradores no confirmados antiguos con el mismo cron; no incluido en la migración de la Fase 6. | Pendiente |
 | D14 | `source: "client_app"` en la app cliente de Next.js, rechazado por el `CHECK` | La ruta se usa (botón de reservar en `/c/[tenant]`) y en producción solo hay citas `web` (38): ninguna reserva del cliente se había guardado. Se usa `app` (solo código). | ✅ Commit `f451ed7` en Next.js, pendiente de push |
 | D13 | Confirmar un borrador desde otra conexión del mismo tenant | Go exige mismo tenant, misma conexión y la misma `idempotencyKey` antes de llamar a la RPC (la RPC solo valida el rol del actor). | ✅ Confirmado |
-| D15 | Plantillas de WhatsApp: botones o texto libre | **Botones de respuesta rápida** con payloads fijos `CONFIRM` / `CANCEL`; el parser de texto libre se implementa igual como respaldo (precedencia `ButtonPayload` → `ButtonText` → `Body`). | ✅ Confirmado (Fase 7, D9 del handoff) |
-| D16 | Quién envía las notificaciones salientes (WhatsApp y email) | **Pasan a Go en la Fase 7**, autenticadas con **OIDC de Google (Cloud Run)** verificado también en código. El corte real de Next.js a Go espera a que haya URL de Cloud Run (Fase 9). Requiere `insert` en `notifications` para el rol. | ✅ Confirmado (Fase 7, D10+D11 del handoff) |
-| D17 | Status callbacks de Twilio (entregado, leído, fallido) | No se implementan en la Fase 7; la Status Callback URL se deja vacía. Se reevalúa después de la Fase 9. | ✅ Aplazado |
-| D18 | Tenant y teléfono de pruebas de la Fase 7 | Tenant nuevo `dev-test` (Loja, Ecuador), copia reducida de Elvis Studio: cliente `v.pseudo.11@gmail.com`, owner `javiercalva@teams4soft.com`, especialista "Miguel" sobre un **usuario de auth nuevo** (`profiles.id` es PK y FK a `auth.users`: un usuario = un tenant). Scripts en `docs/handoff/sql/dev_test_tenant.sql`. | ✅ Ejecutado en producción el 2026-09-16; `verify_dev_test_tenant.sql` 16/16 ok |
+
+D8, D10 y D15–D18 (Twilio) se movieron a `docs/plan-twilio.md`.

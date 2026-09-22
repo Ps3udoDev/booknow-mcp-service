@@ -2,7 +2,9 @@
 
 Carpeta de traspaso para continuar la Fase 7 en otra sesión o con otro agente. Fecha de creación: 2026-09-15.
 
-Estado del proyecto: Fases 1–6 hechas (MCP completo, tools de lectura y escrituras en dos pasos validadas en producción). `docs/roadmap.md` manda sobre el estado; esta carpeta es el detalle de la Fase 7.
+> ⏸️ **Aplazada el 2026-09-21** hasta que el equipo defina pagos y número de WhatsApp del SaaS. El estado y el checklist viven ahora en `docs/plan-twilio.md` (ya no en `docs/roadmap.md`); léelo primero, sobre todo la sección "Para retomar después de la reunión". No apliques la migración de 7.3 antes de eso.
+
+Estado del proyecto: Fases 1–6 hechas (MCP completo, tools de lectura y escrituras en dos pasos validadas en producción). `docs/plan-twilio.md` manda sobre el estado de Twilio; esta carpeta es el detalle de trabajo.
 
 ## Documentos
 
@@ -19,7 +21,7 @@ Estado del proyecto: Fases 1–6 hechas (MCP completo, tools de lectura y escrit
 ## Reglas de trabajo (obligatorias)
 
 1. **Un informe por tarea.** Al terminar cada tarea (7.1, 7.2, …), crea `docs/handoff/fase7/reportes/7.X-<slug>.md` siguiendo `plantilla-reporte-task.md`, en el mismo commit que el código. Sin informe, la tarea no está terminada.
-2. **Actualiza `docs/roadmap.md`** en ese mismo commit: marca `[x]` la línea correspondiente de la Fase 7.
+2. **Actualiza `docs/plan-twilio.md`** en ese mismo commit: marca `[x]` la línea correspondiente del checklist.
 3. **TDD.** Test primero, verlo fallar, luego el código. Al terminar, muta a mano 3–5 reglas críticas y comprueba que los tests las detectan; anótalo en el informe.
 4. **Antes de dar una tarea por terminada:** `golangci-lint run` y `go test ./...` deben pasar. Los tests de integración necesitan `TEST_DATABASE_URL` (ver `CLAUDE.md`).
 5. **Migraciones:** este repo nunca las aplica. Si una tarea necesita cambios de esquema o permisos, prepara el SQL en `docs/handoff/sql/`, escribe un documento de instrucciones como los de las Fases 5 y 6 (`docs/handoff/nextjs-migracion-fase*.md`) y **para**: lo aplica el agente del repo Next.js con la aprobación del usuario.
