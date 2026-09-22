@@ -233,7 +233,11 @@ Runbook: **`docs/runbook-cloud-run.md`**. Manifiesto y scripts en `deploy/cloudr
 - [ ] Despliegue por digest ✅ (staging). Escaneo de imagen aplazado por coste (Container Scanning no activado, 2026-09-22). SBOM y provenance quedan para el pipeline con Workload Identity Federation.
 - [x] Alertas en producción (2026-09-22, `deploy/monitoring/apply.sh`, idempotente): 5xx, pico de 4xx, latencia p95, JWKS, Postgres y tools con error interno. Avisan a `v.pseudo.developer@gmail.com`. Sentry, más adelante.
 - [x] Rollback probado en staging (2026-09-22): tráfico devuelto a la revisión 00001, smoke en verde y vuelta a la última revisión.
-- [ ] 🔒 Dominio con HTTPS: `mcp.agendia.store` (Cloudflare, CNAME en Solo DNS) con domain mapping. Falta verificar `agendia.store` en Search Console (pasos en el runbook).
+- [ ] 🔒 Dominio con HTTPS `mcp.agendia.store` (2026-09-22):
+  - Hecho: `agendia.store` verificado en Search Console, CNAME en Cloudflare en Solo DNS y domain mapping creado por API REST.
+  - Certificado emitido en ~13 min; el frontend tardó otros ~8 min en servirlo (hasta entonces, error en el handshake TLS).
+  - Smoke por el dominio en verde.
+  - Falta redesplegar producción con `MCP_PUBLIC_URL=https://mcp.agendia.store`.
 - [x] 🔒 Producción `booknow-mcp` desplegada por el usuario el 2026-09-22 (pública, mismo digest que staging): `https://booknow-mcp-248015398241.us-west1.run.app`. `smoke.sh` con token OAuth real: 17/17. Probes en verde y logs sin tokens ni cadenas de conexión. Los clientes MCP siguen en Next.js hasta la Fase 10.
 
 ## Fases futuras (v2) — fuera del alcance actual
