@@ -220,7 +220,7 @@ Runbook: **`docs/runbook-cloud-run.md`**. Manifiesto y scripts en `deploy/cloudr
   - Sin IAM → 403.
   - `smoke.sh` con IAM (`X-Serverless-Authorization`) y token OAuth real: 17/17 checks (metadata, 401, Origin 403, `initialize`, 8 tools, `health`, GET 405).
   - Logs con severidad correcta y sin tokens, cadenas de conexión ni contraseñas.
-- [ ] Imagen escaneada (Artifact Registry) y despliegue por digest: preparados. SBOM y provenance quedan para el pipeline con Workload Identity Federation.
+- [ ] Despliegue por digest ✅ (staging). Escaneo de imagen aplazado por coste (Container Scanning no activado, 2026-09-22). SBOM y provenance quedan para el pipeline con Workload Identity Federation.
 - [x] Alertas en producción (2026-09-22, `deploy/monitoring/apply.sh`, idempotente): 5xx, pico de 4xx, latencia p95, JWKS, Postgres y tools con error interno. Avisan a `v.pseudo.developer@gmail.com`. Sentry, más adelante.
 - [x] Rollback probado en staging (2026-09-22): tráfico devuelto a la revisión 00001, smoke en verde y vuelta a la última revisión.
 - [ ] 🔒 Dominio con HTTPS: `mcp.agendia.store` (Cloudflare, CNAME en Solo DNS) con domain mapping. Falta verificar `agendia.store` en Search Console (pasos en el runbook).

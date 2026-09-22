@@ -28,7 +28,8 @@ cuenta de runtime `agendia-mcp-runner@agendia-mcp.iam.gserviceaccount.com`. Todo
 export PROJECT_ID=agendia-mcp REGION=us-west1
 export RUNTIME_SA="agendia-mcp-runner@$PROJECT_ID.iam.gserviceaccount.com"
 gcloud config set project "$PROJECT_ID"
-gcloud services enable run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com   containerscanning.googleapis.com --quiet
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com --quiet
+# Container Scanning (containerscanning.googleapis.com) no está activado: tiene coste por imagen (decisión del 2026-09-22).
 gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
 
 # La cuenta de runtime solo necesita escribir logs y métricas y leer SUS secretos (se concede por secreto, abajo).
@@ -41,7 +42,8 @@ done
 for secret in booknow-mcp-staging-database-url booknow-mcp-database-url; do
   read -rsp "DATABASE_URL para $secret: " DB_URL; echo
   printf '%s' "$DB_URL" | gcloud secrets create "$secret" --data-file=- --replication-policy=automatic --quiet
-  gcloud secrets add-iam-policy-binding "$secret"     --member="serviceAccount:$RUNTIME_SA" --role=roles/secretmanager.secretAccessor --quiet
+  gcloud secrets add-iam-policy-binding "$secret" \
+    --member="serviceAccount:$RUNTIME_SA" --role=roles/secretmanager.secretAccessor --quiet
 done
 unset DB_URL
 ```
@@ -56,7 +58,6 @@ TAG="$REGION-docker.pkg.dev/$PROJECT_ID/agendia-mcp/booknow-mcp:$(git rev-parse 
 docker build --platform linux/amd64 -t "$TAG" .
 docker push "$TAG"
 IMAGE=$(docker inspect --format '{{index .RepoDigests 0}}' "$TAG")   # …/booknow-mcp@sha256:…
-gcloud artifacts docker images describe "$IMAGE" --show-package-vulnerability   # revisar antes de desplegar
 ```
 
 Staging y producción reciben **el mismo `$IMAGE`**: lo que pasó el smoke es exactamente lo que se promueve.
