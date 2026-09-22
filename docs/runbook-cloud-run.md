@@ -66,10 +66,15 @@ Staging y producción reciben **el mismo `$IMAGE`**: lo que pasó el smoke es ex
 ```bash
 deploy/cloudrun/render.sh staging "$IMAGE" > /tmp/booknow-mcp-staging.yaml
 gcloud run services replace /tmp/booknow-mcp-staging.yaml --region "$REGION"
-# Staging es privado: solo tu cuenta puede invocarlo
-gcloud run services add-iam-policy-binding booknow-mcp-staging --region "$REGION" \
-  --member="user:$(gcloud config get-value account)" --role=roles/run.invoker --quiet
+# Staging es privado: sin binding de allUsers. El owner del proyecto ya puede invocarlo; a otra persona que pruebe:
+# gcloud run services add-iam-policy-binding booknow-mcp-staging --region "$REGION" \
+#   --member="user:<correo>" --role=roles/run.invoker --quiet
 ```
+
+> `/healthz` no responde desde fuera: el frontend de Cloud Run reserva esa ruta y devuelve 404 antes de llegar al
+> contenedor. La liveness probe sí la alcanza (va por dentro de la instancia). Para comprobaciones externas usa `/readyz`.
+>
+> En Windows, desde Git Bash, `gcloud.cmd` falla con filtros entre comillas (`gcloud logging read '…'`); usa PowerShell para esos comandos.
 
 Smoke (sin token MCP comprueba transporte, probes, metadata OAuth, 401 y Origin; con token, también las tools):
 
