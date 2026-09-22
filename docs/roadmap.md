@@ -21,7 +21,7 @@ Márcalo en el mismo commit que completa cada tarea.
 | 5. Plataforma transversal y tools de lectura | ✅ hecho y validado contra producción |
 | 6. Escrituras en dos pasos (drafts) | ✅ hecho y validado contra producción (cita real creada por MCP) |
 | 7. Twilio WhatsApp (webhook y notificaciones) | ⏸️ aplazada → `docs/plan-twilio.md` (7.1–7.2 hechas) |
-| 8. Fallback REST `/api/actions/*` | ⬜ pendiente |
+| 8. Fallback REST `/api/actions/*` | ❌ descartada (D19) |
 | 9. Despliegue en Cloud Run | 🟡 staging y producción desplegados y validados, alertas y rollback probados; falta el dominio `mcp.agendia.store` |
 | 10. QA integral, corte y retirada de Next.js | ⬜ pendiente |
 
@@ -32,8 +32,8 @@ Márcalo en el mismo commit que completa cada tarea.
 - [x] Catálogo de las 7 tools MCP, scopes y reglas de PII (`migracion/README.md`).
 - [x] Spec de diseño y contrato de implementación del MCP (`migracion/specs/`).
 - [x] Esquema MCP presente en el snapshot local: `mcp_connections`, `mcp_appointment_drafts`, `mcp_tool_calls`, RPC `confirm_mcp_appointment_draft`.
-- [ ] Capturar ejemplos reales de request/response de `/api/mcp`, `/api/actions/*` y del webhook Twilio (sin PII) para usarlos como tests de contrato.
-- [ ] ⚠️ Definir la URL pública final del servicio (p. ej. `mcp.booknow.app`) y si `/api/actions/*` se mantiene o se retira.
+- [ ] Capturar ejemplos reales de request/response de `/api/mcp` (sin PII) para usarlos como tests de contrato (`/api/actions/*` descartado, D19; Twilio en `docs/plan-twilio.md`).
+- [x] URL pública final: `https://mcp.agendia.store` (Fase 9). `/api/actions/*` se retira (D19).
 - [x] Confirmar los cambios de comportamiento de autorización frente al TS (D1–D3).
 
 ## Fase 2 — Esqueleto Go
@@ -194,11 +194,21 @@ si `TWILIO_AUTH_TOKEN` y `TWILIO_WEBHOOK_URL` están vacías la ruta `/webhooks/
 
 ## Fase 8 — Fallback REST `/api/actions/*`
 
-- [ ] ⚠️ Confirmar que sigue siendo necesario (clientes sin MCP nativo).
-- [ ] Reutilizar los mismos casos de uso de las tools (sin duplicar lógica) con el mismo middleware auth + tenant.
-- [ ] DTOs con `DisallowUnknownFields`, límite de body y errores uniformes (400/401/403/404/409/413/415/422/429).
-- [ ] CORS explícito (el TS usaba `*`).
-- [ ] Tests de contrato contra los ejemplos capturados en la Fase 1.
+> ❌ **Descartada el 2026-09-22 (D19).** No se migra a Go y la ruta de Next.js se retira en la Fase 10.
+
+Qué era: las mismas 7 tools como REST JSON (`GET`/`POST /api/actions/<tool>`) para clientes sin MCP nativo (Actions de ChatGPT, Zapier, n8n…).
+Exigía la misma autenticación que `/mcp` (personal `owner|admin|manager` con conexión consentida): no servía para leads ni para clientes finales, que son las fases v2.
+
+Motivos:
+- **Sin uso:** 0 invocaciones en los logs de producción de Vercel de los últimos 30 días, frente a 23 de `/api/mcp`.
+- **Fallos en el TS:**
+  - CORS `*` y texto de Postgres devuelto al cliente.
+  - `idempotency_key` generada si falta, así que los reintentos duplican borradores.
+  - Argumentos auditados sin sanear.
+  - Crear y confirmar en dos llamadas seguidas sin aprobación humana.
+- **Un solo contrato:** los clientes de IA actuales hablan MCP de forma nativa, y mantener dos contratos duplica pruebas y superficie de ataque.
+
+Si aparece una integración que lo necesite (Zapier, n8n), se añade en Go sobre los mismos casos de uso (`internal/application/*`), con el mismo middleware auth + tenant, DTOs estrictos, CORS explícito y la misma confirmación en dos pasos.
 
 ## Fase 9 — Despliegue en Cloud Run
 
@@ -260,6 +270,7 @@ Runbook: **`docs/runbook-cloud-run.md`**. Manifiesto y scripts en `deploy/cloudr
 | D11 | Purga de auditoría MCP | `pg_cron` en Supabase con `purge_mcp_tool_calls()`; el rol del servicio no puede borrar. | ✅ Aplicado en producción (job diario 03:17 UTC) |
 | D12 | Retención de `mcp_appointment_drafts` (guarda `customer_notes` del LLM) | Purgar borradores no confirmados antiguos con el mismo cron; no incluido en la migración de la Fase 6. | Pendiente |
 | D14 | `source: "client_app"` en la app cliente de Next.js, rechazado por el `CHECK` | La ruta se usa (botón de reservar en `/c/[tenant]`) y en producción solo hay citas `web` (38): ninguna reserva del cliente se había guardado. Se usa `app` (solo código). | ✅ Commit `f451ed7` en Next.js, pendiente de push |
+| D19 | Fallback REST `/api/actions/*` (Fase 8) | Descartado: sin uso en 30 días y con fallos de seguridad en el TS; los clientes de IA hablan MCP. Se retira de Next.js en la Fase 10 y, si hiciera falta, se reimplementa en Go sobre los mismos casos de uso. | ✅ Confirmado (2026-09-22) |
 | D13 | Confirmar un borrador desde otra conexión del mismo tenant | Go exige mismo tenant, misma conexión y la misma `idempotencyKey` antes de llamar a la RPC (la RPC solo valida el rol del actor). | ✅ Confirmado |
 
 D8, D10 y D15–D18 (Twilio) se movieron a `docs/plan-twilio.md`.

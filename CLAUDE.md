@@ -1,6 +1,6 @@
 # booknow-mcp-service
 
-Servidor dedicado en Go para BookNow: **MCP (Streamable HTTP)**, **webhooks/notificaciones Twilio WhatsApp** y API REST de negocio, sobre **Supabase** (Postgres + Auth) y desplegado en **Cloud Run**. Reemplaza gradualmente las rutas `/api/mcp`, `/api/actions/*` y `/api/webhooks/twilio` de la app Next.js en Vercel.
+Servidor dedicado en Go para BookNow: **MCP (Streamable HTTP)** y **webhooks/notificaciones Twilio WhatsApp**, sobre **Supabase** (Postgres + Auth) y desplegado en **Cloud Run**. Reemplaza gradualmente las rutas `/api/mcp` y `/api/webhooks/twilio` de la app Next.js en Vercel; `/api/actions/*` se retira sin migrar (D19).
 
 ## Estado del proyecto
 
