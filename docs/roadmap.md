@@ -22,7 +22,7 @@ Márcalo en el mismo commit que completa cada tarea.
 | 6. Escrituras en dos pasos (drafts) | ✅ hecho y validado contra producción (cita real creada por MCP) |
 | 7. Twilio WhatsApp (webhook y notificaciones) | ⏸️ aplazada → `docs/plan-twilio.md` (7.1–7.2 hechas) |
 | 8. Fallback REST `/api/actions/*` | ⬜ pendiente |
-| 9. Despliegue en Cloud Run | 🟡 preparado en el repo; falta el proyecto GCP (🔒) |
+| 9. Despliegue en Cloud Run | 🟡 staging desplegado y validado; faltan producción, alertas, rollback y dominio |
 | 10. QA integral, corte y retirada de Next.js | ⬜ pendiente |
 
 ---
@@ -210,13 +210,16 @@ Runbook: **`docs/runbook-cloud-run.md`**. Manifiesto y scripts en `deploy/cloudr
   - CI con ShellCheck y build de la imagen.
 - [x] Imagen de producción verificada en local contra Supabase local: respeta `$PORT`, corre como `nonroot`, apagado limpio con SIGTERM, `/webhooks/twilio` no se sirve sin configuración, `smoke.sh` pasa. Con `APP_ENV=staging` arranca contra el JWKS de producción.
 - [x] Logs con `severity`/`message` para Cloud Logging (`internal/platform/logging`). Con `level`/`msg`, todas las entradas quedaban sin severidad y no se podía alertar por errores. 3 mutaciones detectadas.
-- [ ] 🔒 Proyecto GCP, Artifact Registry y cuenta de servicio de runtime con permisos mínimos. Creados el 2026-09-22: proyecto `agendia-mcp`, repositorio `agendia-mcp` (`us-west1`) y cuenta `agendia-mcp-runner`. Falta quitarle a la cuenta Artifact Registry Writer, Cloud Run Invoker y el Secret Accessor a nivel de proyecto (runbook).
-- [ ] 🔒 Secretos en Secret Manager con versiones fijadas: `DATABASE_URL` por entorno (los de Twilio y Resend, en `docs/plan-twilio.md`).
-- [ ] Conectividad a Supabase: Session Pooler (IPv4) con `booknow_mcp_service`, ya validado desde local (D9); falta desde Cloud Run.
+- [x] 🔒 Proyecto GCP `agendia-mcp`, Artifact Registry `agendia-mcp` (`us-west1`) y cuenta de runtime `agendia-mcp-runner`. Verificado el 2026-09-22: a nivel de proyecto la cuenta solo tiene Logs Writer y Monitoring Metric Writer.
+- [x] 🔒 Secretos en Secret Manager con versiones fijadas: `booknow-mcp-staging-database-url` y `booknow-mcp-database-url` (v1). Formato verificado sin leer el valor y `secretAccessor` solo para la cuenta de runtime en cada secreto. Los de Twilio y Resend, en `docs/plan-twilio.md`.
+- [x] Conectividad desde Cloud Run al Session Pooler con `booknow_mcp_service`: `/readyz` en 200 y la fila de auditoría de `health` escrita en producción.
 - [x] 🔒 `max_instances × DB_MAX_CONNS` dentro del pool: 1×2 (staging) + 3×4 (producción) = 14 frente a un Pool Size de 15 (confirmado por el usuario el 2026-09-22).
-- [ ] Startup probe a `/readyz` y liveness a `/healthz`: preparadas en `service.yaml`; falta verlas en Cloud Run.
-- [ ] Concurrencia 40, timeout 60 s (sin SSE) y máximo de instancias: preparados; falta verlos en Cloud Run.
-- [ ] Staging privado (IAM + `X-Serverless-Authorization`) y smoke por digest. La parte MCP de `smoke.sh` (con token OAuth) no se ha probado: el token de `.env.smoke` estaba caducado.
+- [x] Startup probe a `/readyz` (pasa al segundo intento) y liveness a `/healthz`, que pasa dentro de la instancia. Desde fuera, el frontend de Cloud Run reserva `/healthz` y responde 404 antes de llegar al contenedor, así que `smoke.sh` usa `/readyz`.
+- [x] Concurrencia 40, timeout 60 s (sin SSE) y máximo de instancias aplicados con `services replace`.
+- [x] Staging privado desplegado el 2026-09-22 (`booknow-mcp-staging`, imagen `@sha256:c4fc5a11…` del commit `9939666`):
+  - Sin IAM → 403.
+  - `smoke.sh` con IAM (`X-Serverless-Authorization`) y token OAuth real: 17/17 checks (metadata, 401, Origin 403, `initialize`, 8 tools, `health`, GET 405).
+  - Logs con severidad correcta y sin tokens, cadenas de conexión ni contraseñas.
 - [ ] Imagen escaneada (Artifact Registry) y despliegue por digest: preparados. SBOM y provenance quedan para el pipeline con Workload Identity Federation.
 - [ ] Alertas de 401/403/429/5xx, latencia, JWKS y Postgres (filtros en el runbook).
 - [ ] Rollback probado.

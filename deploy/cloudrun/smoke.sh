@@ -41,7 +41,8 @@ contains() { # name, needle, haystack
 
 code() { curl -s -o /dev/null -w '%{http_code}' "${iam[@]}" "$@"; }
 
-check "GET /healthz" 200 "$(code "$base/healthz")"
+# /healthz is not checked from outside: Cloud Run's frontend reserves that path and answers 404 before the
+# container (the liveness probe still reaches it inside the instance). /readyz proves the process and Postgres.
 check "GET /readyz" 200 "$(code "$base/readyz")"
 
 metadata=$(curl -s "${iam[@]}" "$base/.well-known/oauth-protected-resource/mcp")
