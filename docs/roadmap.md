@@ -22,7 +22,7 @@ Márcalo en el mismo commit que completa cada tarea.
 | 6. Escrituras en dos pasos (drafts) | ✅ hecho y validado contra producción (cita real creada por MCP) |
 | 7. Twilio WhatsApp (webhook y notificaciones) | ⏸️ aplazada → `docs/plan-twilio.md` (7.1–7.2 hechas) |
 | 8. Fallback REST `/api/actions/*` | ⬜ pendiente |
-| 9. Despliegue en Cloud Run | 🟡 staging desplegado y validado; faltan producción, alertas, rollback y dominio |
+| 9. Despliegue en Cloud Run | 🟡 staging y producción desplegados y validados, alertas y rollback probados; falta el dominio `mcp.agendia.store` |
 | 10. QA integral, corte y retirada de Next.js | ⬜ pendiente |
 
 ---
@@ -224,7 +224,7 @@ Runbook: **`docs/runbook-cloud-run.md`**. Manifiesto y scripts en `deploy/cloudr
 - [x] Alertas en producción (2026-09-22, `deploy/monitoring/apply.sh`, idempotente): 5xx, pico de 4xx, latencia p95, JWKS, Postgres y tools con error interno. Avisan a `v.pseudo.developer@gmail.com`. Sentry, más adelante.
 - [x] Rollback probado en staging (2026-09-22): tráfico devuelto a la revisión 00001, smoke en verde y vuelta a la última revisión.
 - [ ] 🔒 Dominio con HTTPS: `mcp.agendia.store` (Cloudflare, CNAME en Solo DNS) con domain mapping. Falta verificar `agendia.store` en Search Console (pasos en el runbook).
-- [ ] 🔒 Servicio de producción `booknow-mcp` (público, mismo digest que staging). El auto mode de Claude Code bloqueó el despliegue: lo ejecuta el usuario.
+- [x] 🔒 Producción `booknow-mcp` desplegada por el usuario el 2026-09-22 (pública, mismo digest que staging): `https://booknow-mcp-248015398241.us-west1.run.app`. `smoke.sh` con token OAuth real: 17/17. Probes en verde y logs sin tokens ni cadenas de conexión. Los clientes MCP siguen en Next.js hasta la Fase 10.
 
 ## Fases futuras (v2) — fuera del alcance actual
 
