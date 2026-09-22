@@ -15,43 +15,44 @@ Archivos: `deploy/cloudrun/service.yaml` (manifiesto), `deploy/cloudrun/{staging
 | Base de datos | Ambos contra Supabase de producción con el rol `booknow_mcp_service` | No hay otro proyecto Supabase. Las pruebas de escritura en staging, solo en el tenant `dev-test`. |
 | Acceso en staging | Privado por IAM (`roles/run.invoker` solo para quien prueba) | Se prueba sin exponer el servicio. El token MCP va en `Authorization` y el de IAM en `X-Serverless-Authorization`. |
 | Acceso en producción | Público; la autorización la hace la app (Bearer de Supabase + tenant) | Los clientes MCP no pueden presentar identidad de Google. |
-| Conexiones | staging 1 instancia × 2 conexiones + producción 3 × 4 = **14** | En modo sesión, cada conexión del pool ocupa un cliente del pooler. Comprueba el **Pool Size** en Supabase → Database → Settings → Connection pooling y ajusta `MAX_INSTANCES`/`DB_MAX_CONNS` para que la suma quede por debajo. |
+| Conexiones | staging 1 instancia × 2 conexiones + producción 3 × 4 = **14** | En modo sesión, cada conexión del pool ocupa un cliente del pooler. Pool Size confirmado: **15** (2026-09-22). Deja margen para el smoke local (`DB_MAX_CONNS` pequeño) y no subas `MAX_INSTANCES` sin recalcular. |
 | Request | concurrencia 40, timeout 60 s, 1 vCPU, 256 MiB, CPU solo durante el request | `/mcp` responde JSON sin SSE y todo el trabajo (auditoría, `last_used_at`) ocurre dentro del request. |
 | Probes | startup → `/readyz` (Postgres); liveness → `/healthz` (sin base) | Una caída breve de Supabase no debe reiniciar instancias sanas. |
 
 ## Preparación única 🔒
 
-```bash
-export PROJECT_ID=<gcp-project-id> REGION=us-west1
-gcloud config set project "$PROJECT_ID"
-gcloud services enable run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com \
-  containerscanning.googleapis.com --quiet
+Proyecto **`agendia-mcp`** (número `248015398241`), repositorio de Artifact Registry `agendia-mcp` en `us-west1` y
+cuenta de runtime `agendia-mcp-runner@agendia-mcp.iam.gserviceaccount.com`. Todo creado el 2026-09-22.
 
-# Registro de imágenes (con escaneo de vulnerabilidades al subir)
-gcloud artifacts repositories create booknow --repository-format=docker --location="$REGION" --quiet
+```bash
+export PROJECT_ID=agendia-mcp REGION=us-west1
+export RUNTIME_SA="agendia-mcp-runner@$PROJECT_ID.iam.gserviceaccount.com"
+gcloud config set project "$PROJECT_ID"
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com   containerscanning.googleapis.com --quiet
 gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
 
-# Identidad del servicio: sin roles de proyecto; solo lee sus propios secretos
-gcloud iam service-accounts create booknow-mcp-runtime --display-name="booknow-mcp runtime" --quiet
-export RUNTIME_SA="booknow-mcp-runtime@$PROJECT_ID.iam.gserviceaccount.com"
+# La cuenta de runtime solo necesita escribir logs y métricas y leer SUS secretos (se concede por secreto, abajo).
+# Publicar imágenes e invocar el servicio lo hace tu usuario, no el contenedor.
+for role in roles/artifactregistry.writer roles/run.invoker roles/secretmanager.secretAccessor; do
+  gcloud projects remove-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$RUNTIME_SA" --role="$role" --quiet
+done
 
 # DATABASE_URL (Session Pooler, rol booknow_mcp_service). `read -s` evita que quede en el historial.
 for secret in booknow-mcp-staging-database-url booknow-mcp-database-url; do
   read -rsp "DATABASE_URL para $secret: " DB_URL; echo
   printf '%s' "$DB_URL" | gcloud secrets create "$secret" --data-file=- --replication-policy=automatic --quiet
-  gcloud secrets add-iam-policy-binding "$secret" \
-    --member="serviceAccount:$RUNTIME_SA" --role=roles/secretmanager.secretAccessor --quiet
+  gcloud secrets add-iam-policy-binding "$secret"     --member="serviceAccount:$RUNTIME_SA" --role=roles/secretmanager.secretAccessor --quiet
 done
 unset DB_URL
 ```
 
-Después, completa los `<...>` de `deploy/cloudrun/staging.env` y `production.env` con `PROJECT_ID` y el número de proyecto
-(`gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)'`). `render.sh` no genera nada mientras quede un `<...>`.
+Formato de `DATABASE_URL`: el mismo que `SMOKE_DATABASE_URL` de `.env.smoke`, es decir
+`postgres://booknow_mcp_service.<project-ref>:<password>@aws-0-us-west-2.pooler.supabase.com:5432/postgres?sslmode=require`.
 
 ## Construir y publicar la imagen (por digest)
 
 ```bash
-TAG="$REGION-docker.pkg.dev/$PROJECT_ID/booknow/booknow-mcp:$(git rev-parse --short HEAD)"
+TAG="$REGION-docker.pkg.dev/$PROJECT_ID/agendia-mcp/booknow-mcp:$(git rev-parse --short HEAD)"
 docker build --platform linux/amd64 -t "$TAG" .
 docker push "$TAG"
 IMAGE=$(docker inspect --format '{{index .RepoDigests 0}}' "$TAG")   # …/booknow-mcp@sha256:…

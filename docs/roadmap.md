@@ -210,10 +210,10 @@ Runbook: **`docs/runbook-cloud-run.md`**. Manifiesto y scripts en `deploy/cloudr
   - CI con ShellCheck y build de la imagen.
 - [x] Imagen de producción verificada en local contra Supabase local: respeta `$PORT`, corre como `nonroot`, apagado limpio con SIGTERM, `/webhooks/twilio` no se sirve sin configuración, `smoke.sh` pasa. Con `APP_ENV=staging` arranca contra el JWKS de producción.
 - [x] Logs con `severity`/`message` para Cloud Logging (`internal/platform/logging`). Con `level`/`msg`, todas las entradas quedaban sin severidad y no se podía alertar por errores. 3 mutaciones detectadas.
-- [ ] 🔒 Proyecto GCP, Artifact Registry y cuenta de servicio de runtime con permisos mínimos (comandos en el runbook, "Preparación única").
+- [ ] 🔒 Proyecto GCP, Artifact Registry y cuenta de servicio de runtime con permisos mínimos. Creados el 2026-09-22: proyecto `agendia-mcp`, repositorio `agendia-mcp` (`us-west1`) y cuenta `agendia-mcp-runner`. Falta quitarle a la cuenta Artifact Registry Writer, Cloud Run Invoker y el Secret Accessor a nivel de proyecto (runbook).
 - [ ] 🔒 Secretos en Secret Manager con versiones fijadas: `DATABASE_URL` por entorno (los de Twilio y Resend, en `docs/plan-twilio.md`).
 - [ ] Conectividad a Supabase: Session Pooler (IPv4) con `booknow_mcp_service`, ya validado desde local (D9); falta desde Cloud Run.
-- [ ] 🔒 `max_instances × DB_MAX_CONNS` dentro del pool: propuesta 1×2 (staging) + 3×4 (producción) = 14. Falta confirmar el Pool Size del Session Pooler en el panel de Supabase.
+- [x] 🔒 `max_instances × DB_MAX_CONNS` dentro del pool: 1×2 (staging) + 3×4 (producción) = 14 frente a un Pool Size de 15 (confirmado por el usuario el 2026-09-22).
 - [ ] Startup probe a `/readyz` y liveness a `/healthz`: preparadas en `service.yaml`; falta verlas en Cloud Run.
 - [ ] Concurrencia 40, timeout 60 s (sin SSE) y máximo de instancias: preparados; falta verlos en Cloud Run.
 - [ ] Staging privado (IAM + `X-Serverless-Authorization`) y smoke por digest. La parte MCP de `smoke.sh` (con token OAuth) no se ha probado: el token de `.env.smoke` estaba caducado.
