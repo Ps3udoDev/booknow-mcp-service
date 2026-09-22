@@ -222,58 +222,20 @@ func (s *Service) SearchCustomers(ctx context.Context, tenantID string, in Searc
 
 // AvailableSlots computes bookable times for a service at a branch on a local date.
 func (s *Service) AvailableSlots(ctx context.Context, tenantID string, in AvailableSlotsInput) (AvailableSlots, error) {
-	if err := requiredUUID("serviceId", in.ServiceID); err != nil {
-		return AvailableSlots{}, err
-	}
-
-	if err := requiredUUID("branchId", in.BranchID); err != nil {
-		return AvailableSlots{}, err
-	}
-
-	if err := optionalUUID("specialistId", in.SpecialistID); err != nil {
-		return AvailableSlots{}, err
-	}
-
-	service, err := s.store.SlotService(ctx, tenantID, in.ServiceID)
-	if err := entityErr(err, service.Active, "El servicio no existe o no está activo en este negocio."); err != nil {
-		return AvailableSlots{}, err
-	}
-
-	branch, err := s.store.SlotBranch(ctx, tenantID, in.BranchID)
-	if err := entityErr(err, branch.Active, "La sucursal no existe o no está activa en este negocio."); err != nil {
-		return AvailableSlots{}, err
-	}
-
-	loc := location(branch.Timezone)
-
-	day, err := s.slotDay(in.Date, loc)
+	c, err := s.catalog(ctx, tenantID, in.ServiceID, in.BranchID)
 	if err != nil {
 		return AvailableSlots{}, err
 	}
 
-	weekday := weekdays[day.Weekday()]
-
-	availability, err := s.store.Availability(ctx, AvailabilityQuery{
-		TenantID: tenantID, BranchID: in.BranchID, SpecialistID: in.SpecialistID,
-		Weekday: weekday, Date: day.Format(dateLayout), DayStart: day, DayEnd: day.AddDate(0, 0, 1),
-	})
+	day, err := s.slotDay(in.Date, c.loc)
 	if err != nil {
-		return AvailableSlots{}, fmt.Errorf("availability: %w", err)
+		return AvailableSlots{}, err
 	}
 
-	if in.SpecialistID != "" && !availability.SpecialistFound {
-		return AvailableSlots{}, notFound("El especialista no existe o no está activo en este negocio.")
+	slots, err := s.daySlots(ctx, tenantID, c, day, in.SpecialistID, 0)
+	if err != nil {
+		return AvailableSlots{}, err
 	}
-
-	slots := computeSlots(slotInput{
-		loc: loc, day: day, now: s.now(),
-		durationMinutes: service.DurationMinutes, bufferMinutes: service.BufferMinutes,
-		requiresSpecialist: service.RequiresSpecialist,
-		branchHours:        branchDayHours(branch.OperatingHours, weekday),
-		specialists:        availability.Specialists,
-		exceptions:         availability.Exceptions,
-		busy:               availability.Busy,
-	})
 
 	var specialistID *string
 	if in.SpecialistID != "" {
@@ -282,14 +244,115 @@ func (s *Service) AvailableSlots(ctx context.Context, tenantID string, in Availa
 
 	return AvailableSlots{
 		Date:                day.Format(dateLayout),
-		Timezone:            loc.String(),
-		Service:             SlotServiceRef{ID: service.ID, Name: service.Name, DurationMinutes: service.DurationMinutes},
-		Branch:              Ref{ID: branch.ID, Name: branch.Name},
+		Timezone:            c.loc.String(),
+		Service:             SlotServiceRef{ID: c.service.ID, Name: c.service.Name, DurationMinutes: c.service.DurationMinutes},
+		Branch:              Ref{ID: c.branch.ID, Name: c.branch.Name},
 		SpecialistID:        specialistID,
 		SlotIntervalMinutes: int(slotStep / time.Minute),
-		CapacityChecked:     service.RequiresSpecialist,
+		CapacityChecked:     c.service.RequiresSpecialist,
 		Slots:               slots,
 	}, nil
+}
+
+// CheckSlot reports whether a booking can start exactly at in.Start, with the same rules as AvailableSlots
+// and the service duration extended by in.ExtraMinutes.
+func (s *Service) CheckSlot(ctx context.Context, tenantID string, in SlotCheckInput) (SlotCheck, error) {
+	c, err := s.catalog(ctx, tenantID, in.ServiceID, in.BranchID)
+	if err != nil {
+		return SlotCheck{}, err
+	}
+
+	duration := c.service.DurationMinutes + in.ExtraMinutes
+	if duration <= 0 {
+		return SlotCheck{}, invalidArgument("La duración del servicio con la variante debe ser positiva.")
+	}
+
+	if in.Start.Before(s.now()) {
+		return SlotCheck{}, invalidArgument("La fecha y hora de la cita no puede estar en el pasado.")
+	}
+
+	start := in.Start.In(c.loc)
+
+	day, err := s.slotDay(start.Format(dateLayout), c.loc)
+	if err != nil {
+		return SlotCheck{}, err
+	}
+
+	slots, err := s.daySlots(ctx, tenantID, c, day, in.SpecialistID, in.ExtraMinutes)
+	if err != nil {
+		return SlotCheck{}, err
+	}
+
+	check := SlotCheck{Service: c.service, Branch: c.branch, Timezone: c.loc.String(), DurationMinutes: duration}
+
+	for _, slot := range slots {
+		if slot.Start.Equal(start) {
+			check.Available = true
+			check.Specialists = slot.Specialists
+		}
+	}
+
+	return check, nil
+}
+
+// slotCatalog is a validated, active service and branch of the tenant.
+type slotCatalog struct {
+	service SlotService
+	branch  SlotBranch
+	loc     *time.Location
+}
+
+func (s *Service) catalog(ctx context.Context, tenantID, serviceID, branchID string) (slotCatalog, error) {
+	if err := requiredUUID("serviceId", serviceID); err != nil {
+		return slotCatalog{}, err
+	}
+
+	if err := requiredUUID("branchId", branchID); err != nil {
+		return slotCatalog{}, err
+	}
+
+	service, err := s.store.SlotService(ctx, tenantID, serviceID)
+	if err := entityErr(err, service.Active, "El servicio no existe o no está activo en este negocio."); err != nil {
+		return slotCatalog{}, err
+	}
+
+	branch, err := s.store.SlotBranch(ctx, tenantID, branchID)
+	if err := entityErr(err, branch.Active, "La sucursal no existe o no está activa en este negocio."); err != nil {
+		return slotCatalog{}, err
+	}
+
+	return slotCatalog{service: service, branch: branch, loc: location(branch.Timezone)}, nil
+}
+
+// daySlots computes the slots of a local day; extraMinutes extends the service duration.
+func (s *Service) daySlots(ctx context.Context, tenantID string, c slotCatalog, day time.Time, specialistID string, extraMinutes int) ([]Slot, error) {
+	if err := optionalUUID("specialistId", specialistID); err != nil {
+		return nil, err
+	}
+
+	weekday := weekdays[day.Weekday()]
+
+	availability, err := s.store.Availability(ctx, AvailabilityQuery{
+		TenantID: tenantID, BranchID: c.branch.ID, SpecialistID: specialistID,
+		Weekday: weekday, Date: day.Format(dateLayout), DayStart: day, DayEnd: day.AddDate(0, 0, 1),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("availability: %w", err)
+	}
+
+	if specialistID != "" && !availability.SpecialistFound {
+		return nil, notFound("El especialista no existe o no está activo en este negocio.")
+	}
+
+	return computeSlots(slotInput{
+		loc: c.loc, day: day, now: s.now(),
+		durationMinutes: c.service.DurationMinutes + extraMinutes, bufferMinutes: c.service.BufferMinutes,
+		requiresSpecialist: c.service.RequiresSpecialist,
+		branchHours:        branchDayHours(c.branch.OperatingHours, weekday),
+		specialists:        availability.Specialists,
+		exceptions:         availability.Exceptions,
+		busy:               availability.Busy,
+	}), nil
 }
 
 func (s *Service) slotDay(date string, loc *time.Location) (time.Time, error) {
@@ -378,7 +441,7 @@ func entityErr(err error, active bool, message string) error {
 }
 
 func requiredUUID(field, value string) error {
-	if !isUUID(strings.TrimSpace(value)) {
+	if !IsUUID(strings.TrimSpace(value)) {
 		return invalidArgument("%s debe ser un UUID válido.", field)
 	}
 
@@ -393,8 +456,8 @@ func optionalUUID(field, value string) error {
 	return requiredUUID(field, value)
 }
 
-// isUUID reports whether s is a canonical hyphenated UUID.
-func isUUID(s string) bool {
+// IsUUID reports whether s is a canonical hyphenated UUID.
+func IsUUID(s string) bool {
 	if len(s) != 36 {
 		return false
 	}

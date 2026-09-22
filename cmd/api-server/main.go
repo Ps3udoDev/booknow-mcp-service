@@ -18,10 +18,13 @@ import (
 	_ "time/tzdata"
 
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/application/business"
+	"github.com/Ps3udoDev/booknow-mcp-service/internal/application/drafts"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/auth"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/config"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/httpapi"
+	"github.com/Ps3udoDev/booknow-mcp-service/internal/integration/twilio"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/mcpserver"
+	"github.com/Ps3udoDev/booknow-mcp-service/internal/platform/logging"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/platform/ratelimit"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/repository/postgres"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/tenant"
@@ -46,7 +49,7 @@ func run() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	logger := logging.New(os.Stdout, cfg.LogLevel)
 	slog.SetDefault(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -69,6 +72,7 @@ func run() error {
 	}
 
 	accessStore := postgres.NewMCPAccessStore(pool)
+	businessService := business.NewService(postgres.NewBusinessStore(pool))
 
 	deps := httpapi.Deps{
 		DB: pool,
@@ -81,11 +85,21 @@ func run() error {
 			RateLimit:           ratelimit.New(cfg.MCPRateLimitPerMinute),
 			Usage:               accessStore,
 			Tools: mcpserver.Deps{
-				Business: business.NewService(postgres.NewBusinessStore(pool)),
+				Business: businessService,
+				Drafts:   drafts.NewService(postgres.NewDraftStore(pool), businessService, cfg.MCPDraftTTL),
 				Audit:    postgres.NewAuditStore(pool),
 				Logger:   logger,
 			},
 		},
+	}
+
+	if cfg.TwilioAuthToken != "" {
+		validator, err := twilio.NewValidator(cfg.TwilioAuthToken, cfg.TwilioWebhookURL)
+		if err != nil {
+			return fmt.Errorf("init twilio webhook: %w", err)
+		}
+
+		deps.Twilio = httpapi.TwilioConfig{Validator: validator, AccountSID: cfg.TwilioAccountSID}
 	}
 
 	// /mcp is stateless and answers with JSON (no long-lived SSE stream), so regular timeouts are safe.

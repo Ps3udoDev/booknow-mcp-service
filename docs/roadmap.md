@@ -8,6 +8,7 @@ Márcalo en el mismo commit que completa cada tarea.
 **Fuentes:** `migracion/specs/*` (comportamiento), `migracion/docs/guia-migracion-next-scp-go-cloud-run.md` (fases y checklist de producción), `migracion/docs/seguridad-backend-go-cloud-run.md`, `CLAUDE.md` (reglas no negociables).
 
 > La numeración sigue la guía de migración, pero el orden se ajustó a la prioridad del proyecto: primero MCP (Fases 4–6), luego Twilio (7) y el fallback REST (8). La guía proponía REST → webhooks → MCP.
+> Desde el 2026-09-21 el foco es **terminar la migración del MCP** (Fases 8–10 sin Twilio); Twilio sigue en `docs/plan-twilio.md`.
 
 ## Resumen
 
@@ -18,10 +19,10 @@ Márcalo en el mismo commit que completa cada tarea.
 | 3. Base de datos, autenticación y tenant | ✅ hecho y validado contra producción |
 | 4. Endpoint `/mcp` y seguridad de transporte | ✅ hecho y validado contra producción (solo falta `last_used_at`, que requiere permiso) |
 | 5. Plataforma transversal y tools de lectura | ✅ hecho y validado contra producción |
-| 6. Escrituras en dos pasos (drafts) | ⏭️ **siguiente** (requiere migración de permisos) |
-| 7. Twilio WhatsApp (webhook y notificaciones) | ⬜ pendiente |
-| 8. Fallback REST `/api/actions/*` | ⬜ pendiente |
-| 9. Despliegue en Cloud Run | ⬜ pendiente |
+| 6. Escrituras en dos pasos (drafts) | ✅ hecho y validado contra producción (cita real creada por MCP) |
+| 7. Twilio WhatsApp (webhook y notificaciones) | ⏸️ aplazada → `docs/plan-twilio.md` (7.1–7.2 hechas) |
+| 8. Fallback REST `/api/actions/*` | ❌ descartada (D19) |
+| 9. Despliegue en Cloud Run | ✅ staging y producción en `https://mcp.agendia.store`, alertas y rollback probado (SBOM/provenance y escaneo aplazados) |
 | 10. QA integral, corte y retirada de Next.js | ⬜ pendiente |
 
 ---
@@ -31,8 +32,8 @@ Márcalo en el mismo commit que completa cada tarea.
 - [x] Catálogo de las 7 tools MCP, scopes y reglas de PII (`migracion/README.md`).
 - [x] Spec de diseño y contrato de implementación del MCP (`migracion/specs/`).
 - [x] Esquema MCP presente en el snapshot local: `mcp_connections`, `mcp_appointment_drafts`, `mcp_tool_calls`, RPC `confirm_mcp_appointment_draft`.
-- [ ] Capturar ejemplos reales de request/response de `/api/mcp`, `/api/actions/*` y del webhook Twilio (sin PII) para usarlos como tests de contrato.
-- [ ] ⚠️ Definir la URL pública final del servicio (p. ej. `mcp.booknow.app`) y si `/api/actions/*` se mantiene o se retira.
+- [ ] Capturar ejemplos reales de request/response de `/api/mcp` (sin PII) para usarlos como tests de contrato (`/api/actions/*` descartado, D19; Twilio en `docs/plan-twilio.md`).
+- [x] URL pública final: `https://mcp.agendia.store` (Fase 9). `/api/actions/*` se retira (D19).
 - [x] Confirmar los cambios de comportamiento de autorización frente al TS (D1–D3).
 
 ## Fase 2 — Esqueleto Go
@@ -135,62 +136,110 @@ Todas: tenant solo desde la conexión (test que intenta pasar `tenantId`/`tenant
   - Resumen 13 citas (sin canceladas) frente a 19 en el listado; huecos del miércoles 09:00–17:30 según horario real; sábado sin horario = 0.
   - Rechazos correctos: búsqueda de 1 carácter, fecha pasada, servicio inexistente, rango de 60 días, estado inválido; `%_%` se busca literal.
   - 17 filas de auditoría escritas como el rol: códigos `INVALID_ARGUMENT`/`NOT_FOUND`, `request_id` únicos, sin el texto buscado; `last_used_at` actualizado. Logs sin tokens, cadenas de conexión ni teléfonos.
-- [ ] ⚠️ Dato a revisar en Elvis Studio: el negocio tiene zona `America/Caracas` y la sucursal con horarios `America/Guayaquil`; la otra sucursal (Caracas) no tiene horarios, así que no ofrece huecos.
+- [x] ⚠️ Dato de Elvis Studio corregido en la Fase 6: la sucursal con horarios tenía `America/Guayaquil` y ahora usa `America/Caracas`. La sucursal San Cristóbal sigue sin horarios, así que no ofrece huecos.
 
 ## Fase 6 — Escrituras en dos pasos
 
-- [ ] `create_appointment_draft` — `appointments:write`:
-  - [ ] TTL `MCP_DRAFT_TTL_MINUTES` (10).
-  - [ ] Validación cross-tenant de cliente, servicio, variante, sucursal y especialista.
-  - [ ] Snapshot de duración, precio y moneda.
-  - [ ] `idempotency_key` (un reintento devuelve el mismo draft).
-  - [ ] `human_summary` para aprobación humana.
-  - [ ] No inserta en `appointments`.
-- [ ] `confirm_appointment_draft` — `appointments:write`:
-  - [ ] Llama a la RPC `confirm_mcp_appointment_draft` (transaccional, `FOR UPDATE`).
-  - [ ] Idempotente; cita `pending` con `source = 'mcp'`.
-- [ ] Tests: draft válido, slot inválido, IDs de otro tenant, reintento con la misma key, draft expirado, doble confirmación y **dos confirmaciones concurrentes** (una sola cita).
+> ⚠️ **Hallazgos en producción** (verificados en solo lectura el 2026-09-15) sobre `confirm_mcp_appointment_draft`:
+> 1. **Nunca ha funcionado**: inserta `source = 'mcp'`, pero `appointments_source_check` no admite `mcp` (0 borradores y 0 citas MCP en producción).
+> 2. Es `SECURITY DEFINER` con `EXECUTE` para `anon` y `authenticated` (vía `PUBLIC`): expuesta por la Data API y confía en el `p_actor_auth_user_id` recibido.
+> 3. Doble reserva: dos borradores distintos del mismo especialista confirmados a la vez crean 2 citas solapadas (reproducido en local con dos sesiones).
+> 4. Devuelve `to_jsonb(a.*)` (notas internas y pagos incluidos), que el TS reenvía al LLM; la respuesta idempotente no valida al actor.
 
-## Fase 7 — Twilio WhatsApp
+### Prerrequisito: migración de permisos y corrección de la RPC (repo Next.js)
+- [x] SQL preparado y validado en local: `docs/handoff/sql/booknow_mcp_service_phase6_drafts.sql` (sha256 `0fd7a8b2…`) + `verify_booknow_mcp_service_phase6.sql` (47/47 checks, idempotente, `ROLLBACK`). Concurrencia con dos sesiones: sin lock 2 citas, con la migración 1 (`SPECIALIST_UNAVAILABLE`); mismo borrador concurrente → 1 cita e idempotente. Contenido:
+  - `CHECK` de `source` con `mcp`.
+  - `SELECT` por columnas en `service_variants` y `mcp_appointment_drafts`; `INSERT` en drafts sin `id`, `status` ni campos de confirmación; sin `UPDATE`/`DELETE`.
+  - RPC con misma firma y contrato: `search_path = ''`, actor validado siempre, advisory lock por especialista, 15 campos explícitos en el resultado.
+  - `EXECUTE` solo para `service_role` (TS hasta el corte) y `booknow_mcp_service`.
+- [x] 🔒 Pasos 1–2 del handoff hechos en Next.js (`20260915212242_booknow_mcp_service_phase6_drafts.sql`, hash correcto, 47/47 checks, base local limpia). Paso 3 OK tras el mantenimiento: 8/8 migraciones sincronizadas, el dry-run lista solo la nueva, md5 de la RPC `40250d38…`, 0 drafts, 0 `source` fuera de lista y archivo en LF.
+- [x] 🔒 Aplicada con el agente de Next.js (`20260915212242_booknow_mcp_service_phase6_drafts.sql`, commit `5c22145` en book-now-hub, sin push) siguiendo `docs/handoff/nextjs-migracion-fase6-drafts-mcp.md`. Verificado desde aquí en solo lectura: md5 del cuerpo `94939d27…`, `search_path=""`, `EXECUTE` solo para `service_role` y `booknow_mcp_service`, permisos de drafts y variantes correctos, `CHECK` con `mcp` validado y 0 drafts.
+- [x] Snapshot local regenerado. `supabase/seed.sql` aplica en local los mismos `REVOKE` que producción: al reaplicar el dump, los privilegios por defecto de Supabase local volvían a dar `EXECUTE` a `anon` y `authenticated` sobre `confirm_mcp_appointment_draft` y también sobre `purge_mcp_tool_calls`, desde la Fase 5. `go test ./...` con integración pasa.
+- [x] D14 corregido en Next.js (commit `f451ed7`, sin push): `source: "app"` y sin enviar el error de Postgres al navegador. 🔒 Pendiente: push y una reserva real desde `/c/[tenant]`.
+- [ ] Next.js (menor, no bloquea): `route.ts:78` todavía devuelve `slotsError.message` al navegador.
 
-> ⚠️ **Hallazgos en el código TS actual** (`migracion/twilio-whatsapp/`), relevantes también para producción hoy:
-> 1. `twilio-webhook-route.ts` **no verifica `X-Twilio-Signature`**: cualquiera puede enviar un POST con un `From` falso y confirmar o cancelar citas.
-> 2. Busca el cliente por los últimos 10 dígitos del teléfono **en todos los tenants** y modifica la cita más reciente de cualquiera de ellos.
-> 3. Detecta la intención con `includes` sobre subcadenas (`"no"` coincide con `"buenos"`, `"si"` con `"casi"`).
-> 4. No deduplica reintentos de Twilio.
-> 5. En el archivo copiado, `notify-route.ts` no autentica al llamador. Hay que confirmar si el middleware de Next.js lo protege. Además, interpola datos sin escapar en el HTML de los emails.
+### Tools (`internal/application/drafts` + `postgres.DraftStore` + `internal/mcpserver`)
+Ambas anotadas como escritura no destructiva e idempotente, auditadas con riesgo `write`; los argumentos extra (p. ej. `tenantId`) los rechaza el SDK antes de llegar al store.
+- [x] `create_appointment_draft`:
+  - [x] TTL `MCP_DRAFT_TTL_MINUTES` (10 por defecto, 1–60).
+  - [x] Validación cross-tenant de cliente activo, variante activa del servicio y, vía `business.CheckSlot`, servicio, sucursal y especialista.
+  - [x] Horario validado con las mismas reglas que `list_available_slots` (rejilla de 30 min, turnos, descansos, excepciones, citas y buffer) y con la duración de la variante; especialista obligatorio si el servicio lo requiere; fecha pasada o a más de 90 días rechazada.
+  - [x] Snapshot de duración, precio (`base_price + price_modifier`) y moneda.
+  - [x] `idempotencyKey` por conexión: reintento con los mismos datos → mismo borrador sin volver a comprobar el horario; misma clave con otros datos → `CONFLICT`; carrera de dos inserts → gana uno y el otro lo reutiliza.
+  - [x] `humanSummary` en español con hora local de la sucursal, sin notas ni teléfonos; indica expiración y que se pida aprobación explícita.
+  - [x] No inserta en `appointments` (el rol no puede).
+- [x] `confirm_appointment_draft`:
+  - [x] Exige borrador del mismo tenant **y conexión** con la misma `idempotencyKey` (D13); si no, `NOT_FOUND`.
+  - [x] Expirado o cancelado → `CONFLICT` sin llamar a la RPC; ya confirmado → respuesta idempotente aunque haya pasado el TTL.
+  - [x] RPC `confirm_mcp_appointment_draft`; errores por prefijo → `NOT_FOUND`, `FORBIDDEN` (estado `denied`), `CONFLICT`; nunca el texto de Postgres.
+- [x] Códigos de auditoría nuevos: `CONFLICT` y `FORBIDDEN`. El resumen de auditoría solo lleva IDs, `scheduledAt` y `hasNotes` (sin notas ni clave).
+- [x] Tests:
+  - Unitarios: borrador válido, horario no disponible, IDs de otro tenant, especialista obligatorio, reintento, clave reutilizada con otros datos, carrera, expiración, conexión o clave distinta, mapeo de errores de la RPC. 12 mutaciones detectadas en el servicio y 5 en la capa MCP.
+  - Integración como `booknow_mcp_service`: lecturas por tenant, insert idempotente, nombres sin fuga entre tenants, confirmación e idempotencia, errores reales de la RPC (expirado, solapado, rol `employee`, cancelado, inexistente) y **confirmaciones concurrentes con datos confirmados** (solapadas → 1 cita; mismo borrador ×2 → 1 cita + 1 idempotente). 8 mutaciones de SQL detectadas.
+  - End-to-end local: cliente MCP → huecos → borrador → reintento → confirmación → repetición → listado → el hueco desaparece.
+- [x] 🔒 Smoke en producción (2026-09-15) con token OAuth real, binario local → pooler con `booknow_mcp_service`:
+  - `tools/list` = 8 tools; las dos nuevas anotadas como escritura no destructiva e idempotente y sin parámetro de tenant (un `tenantId` extra lo rechaza el SDK).
+  - Borrador creado (TTL 10 min, `humanSummary` sin notas), reintento con la misma clave reutilizado, misma clave con otros datos → `CONFLICT`, clave incorrecta al confirmar → `NOT_FOUND`, `draftId` inválido → `INVALID_ARGUMENT`.
+  - Cita real creada a petición del usuario para el cliente `Ps3udo` (su propio usuario): `49f54686` Corte de cabello en Tariba con Miguel, 2026-09-25 13:30–14:00 `America/Caracas`, `pending`, `source = 'mcp'`, con su fila en `appointment_services` y sin `internal_notes`. Segunda confirmación idempotente con la misma cita y el hueco deja de ofrecerse. Se deja creada a propósito para revisarla en el panel.
+  - 8 filas de auditoría con riesgo `write` y códigos correctos; ningún resumen contiene notas ni claves. Logs sin token, sin cadena de conexión y sin teléfonos.
+  - Queda un borrador de prueba sin confirmar que expira solo (el rol no puede borrar; lo purgará D12 cuando se implemente).
+- [x] ⚠️ Zona horaria de Elvis Studio corregida: la sucursal Tariba (Venezuela) tenía `America/Guayaquil` y ofrecía horarios con una hora de desfase. Script ejecutado por el usuario en el SQL Editor: `docs/handoff/sql/fix_elvis_studio_tariba_timezone.sql` (6 horarios activos, 0 citas futuras afectadas). Ambas sucursales quedan en `America/Caracas`.
+- [ ] Revisar las citas `mcp` en el panel de Next.js (etiqueta de `source`) antes de exponer las tools a usuarios reales.
 
-- [ ] `internal/integration/twilio`: verificación de `X-Twilio-Signature` sobre la URL pública y el body original **antes** de parsear; `TWILIO_AUTH_TOKEN` desde Secret Manager.
-- [ ] ⚠️ Resolución de tenant en el webhook (p. ej. por número destino `To` o por la cita notificada), nunca por teléfono global.
-- [ ] ⚠️ Deduplicación persistente por `MessageSid` (tabla nueva → migración en el repo Next.js).
-- [ ] Parser de intención por palabra completa y normalizada (tildes, mayúsculas), con tests table-driven y fuzzing.
-- [ ] Caso de uso: confirmar o cancelar la cita del cliente en el tenant resuelto y registrar en `notifications`.
-- [ ] Respuesta 200 rápida; trabajo costoso fuera del request si hace falta.
-- [ ] Notificaciones salientes (`notify`): autenticación del llamador, WhatsApp con `TWILIO_CONTENT_SID` o fallback, email vía Resend (`internal/integration/resend`) con HTML escapado y `.ics`.
-- [ ] Tests: firma válida, firma alterada, reintento duplicado, cliente en dos tenants, intención ambigua, timeout del proveedor.
-- [ ] ⚠️ `campaigns-send-route.ts` es un stub: decidir si se migra.
+## Fase 7 — Twilio WhatsApp ⏸️ aplazada
+
+Separada del camino crítico el 2026-09-21: pagos y número de WhatsApp del SaaS se definen en una reunión con el equipo.
+Plan, checklist y decisiones de Twilio en **`docs/plan-twilio.md`**. Lo ya hecho (7.1 firma, 7.2 endpoint) queda en `main`:
+si `TWILIO_AUTH_TOKEN` y `TWILIO_WEBHOOK_URL` están vacías la ruta `/webhooks/twilio` no se sirve, así que no bloquea desplegar el MCP.
 
 ## Fase 8 — Fallback REST `/api/actions/*`
 
-- [ ] ⚠️ Confirmar que sigue siendo necesario (clientes sin MCP nativo).
-- [ ] Reutilizar los mismos casos de uso de las tools (sin duplicar lógica) con el mismo middleware auth + tenant.
-- [ ] DTOs con `DisallowUnknownFields`, límite de body y errores uniformes (400/401/403/404/409/413/415/422/429).
-- [ ] CORS explícito (el TS usaba `*`).
-- [ ] Tests de contrato contra los ejemplos capturados en la Fase 1.
+> ❌ **Descartada el 2026-09-22 (D19).** No se migra a Go y la ruta de Next.js se retira en la Fase 10.
+
+Qué era: las mismas 7 tools como REST JSON (`GET`/`POST /api/actions/<tool>`) para clientes sin MCP nativo (Actions de ChatGPT, Zapier, n8n…).
+Exigía la misma autenticación que `/mcp` (personal `owner|admin|manager` con conexión consentida): no servía para leads ni para clientes finales, que son las fases v2.
+
+Motivos:
+- **Sin uso:** 0 invocaciones en los logs de producción de Vercel de los últimos 30 días, frente a 23 de `/api/mcp`.
+- **Fallos en el TS:**
+  - CORS `*` y texto de Postgres devuelto al cliente.
+  - `idempotency_key` generada si falta, así que los reintentos duplican borradores.
+  - Argumentos auditados sin sanear.
+  - Crear y confirmar en dos llamadas seguidas sin aprobación humana.
+- **Un solo contrato:** los clientes de IA actuales hablan MCP de forma nativa, y mantener dos contratos duplica pruebas y superficie de ataque.
+
+Si aparece una integración que lo necesite (Zapier, n8n), se añade en Go sobre los mismos casos de uso (`internal/application/*`), con el mismo middleware auth + tenant, DTOs estrictos, CORS explícito y la misma confirmación en dos pasos.
 
 ## Fase 9 — Despliegue en Cloud Run
 
-- [ ] 🔒 Proyecto GCP, Artifact Registry y cuenta de servicio de runtime por entorno con permisos mínimos.
-- [ ] 🔒 Secretos en Secret Manager con versiones fijadas: `DATABASE_URL`, `TWILIO_AUTH_TOKEN`, `RESEND_API_KEY`.
-- [ ] Conectividad a Supabase: Session Pooler (IPv4) o conexión directa (IPv6).
-- [ ] `max_instances × DB_MAX_CONNS` dentro del límite de conexiones del plan de Supabase.
-- [ ] Startup probe a `/readyz` y liveness a `/healthz` (la liveness no depende de la base).
-- [ ] Concurrencia, timeout de request compatible con SSE y máximo de instancias.
-- [ ] Staging privado; smoke tests por digest.
-- [ ] Imagen escaneada, SBOM y provenance; despliegue por digest.
-- [ ] Logs JSON en Cloud Logging y alertas de 401/403/429/5xx, latencia y fallos de JWKS.
-- [ ] Rollback probado.
-- [ ] 🔒 Dominio con HTTPS.
+Runbook: **`docs/runbook-cloud-run.md`**. Manifiesto y scripts en `deploy/cloudrun/`. Lo marcado como "preparado" está en el repo y verificado en local, pero todavía no en GCP.
+
+- [x] Preparado en el repo:
+  - `service.yaml` declarativo y `render.sh`, que exige imagen por digest, rechaza `<placeholders>` y lee el `.env` como datos, sin ejecutarlo.
+  - Valores de staging y producción sin secretos; `smoke.sh` de solo lectura.
+  - CI con ShellCheck y build de la imagen.
+- [x] Imagen de producción verificada en local contra Supabase local: respeta `$PORT`, corre como `nonroot`, apagado limpio con SIGTERM, `/webhooks/twilio` no se sirve sin configuración, `smoke.sh` pasa. Con `APP_ENV=staging` arranca contra el JWKS de producción.
+- [x] Logs con `severity`/`message` para Cloud Logging (`internal/platform/logging`). Con `level`/`msg`, todas las entradas quedaban sin severidad y no se podía alertar por errores. 3 mutaciones detectadas.
+- [x] 🔒 Proyecto GCP `agendia-mcp`, Artifact Registry `agendia-mcp` (`us-west1`) y cuenta de runtime `agendia-mcp-runner`. Verificado el 2026-09-22: a nivel de proyecto la cuenta solo tiene Logs Writer y Monitoring Metric Writer.
+- [x] 🔒 Secretos en Secret Manager con versiones fijadas: `booknow-mcp-staging-database-url` y `booknow-mcp-database-url` (v1). Formato verificado sin leer el valor y `secretAccessor` solo para la cuenta de runtime en cada secreto. Los de Twilio y Resend, en `docs/plan-twilio.md`.
+- [x] Conectividad desde Cloud Run al Session Pooler con `booknow_mcp_service`: `/readyz` en 200 y la fila de auditoría de `health` escrita en producción.
+- [x] 🔒 `max_instances × DB_MAX_CONNS` dentro del pool: 1×2 (staging) + 3×4 (producción) = 14 frente a un Pool Size de 15 (confirmado por el usuario el 2026-09-22).
+- [x] Startup probe a `/readyz` (pasa al segundo intento) y liveness a `/healthz`, que pasa dentro de la instancia. Desde fuera, el frontend de Cloud Run reserva `/healthz` y responde 404 antes de llegar al contenedor, así que `smoke.sh` usa `/readyz`.
+- [x] Concurrencia 40, timeout 60 s (sin SSE) y máximo de instancias aplicados con `services replace`.
+- [x] Staging privado desplegado el 2026-09-22 (`booknow-mcp-staging`, imagen `@sha256:c4fc5a11…` del commit `9939666`):
+  - Sin IAM → 403.
+  - `smoke.sh` con IAM (`X-Serverless-Authorization`) y token OAuth real: 17/17 checks (metadata, 401, Origin 403, `initialize`, 8 tools, `health`, GET 405).
+  - Logs con severidad correcta y sin tokens, cadenas de conexión ni contraseñas.
+- [ ] Despliegue por digest ✅ (staging). Escaneo de imagen aplazado por coste (Container Scanning no activado, 2026-09-22). SBOM y provenance quedan para el pipeline con Workload Identity Federation.
+- [x] Alertas en producción (2026-09-22, `deploy/monitoring/apply.sh`, idempotente): 5xx, pico de 4xx, latencia p95, JWKS, Postgres y tools con error interno. Avisan a `v.pseudo.developer@gmail.com`. Sentry, más adelante.
+- [x] Rollback probado en staging (2026-09-22): tráfico devuelto a la revisión 00001, smoke en verde y vuelta a la última revisión.
+- [x] 🔒 Dominio con HTTPS `mcp.agendia.store` (2026-09-22):
+  - Hecho: `agendia.store` verificado en Search Console, CNAME en Cloudflare en Solo DNS y domain mapping creado por API REST.
+  - Certificado emitido en ~13 min; el frontend tardó otros ~8 min en servirlo (hasta entonces, error en el handshake TLS).
+  - Smoke por el dominio en verde.
+  - Producción redesplegada con `MCP_PUBLIC_URL=https://mcp.agendia.store`: metadata y challenge 401 anuncian el dominio, y `smoke.sh` con token real da 17/17.
+  - Desde ahora los clientes MCP deben usar el dominio, no la URL `run.app`.
+- [x] 🔒 Producción `booknow-mcp` desplegada por el usuario el 2026-09-22 (pública, mismo digest que staging): `https://booknow-mcp-248015398241.us-west1.run.app`. `smoke.sh` con token OAuth real: 17/17. Probes en verde y logs sin tokens ni cadenas de conexión. Los clientes MCP siguen en Next.js hasta la Fase 10.
 
 ## Fases futuras (v2) — fuera del alcance actual
 
@@ -205,8 +254,8 @@ Todas: tenant solo desde la conexión (test que intenta pasar `tenantId`/`tenant
 - [ ] QA: OAuth aprobado, denegado y expirado; conexión revocada; módulo deshabilitado; scope faltante; aislamiento cross-tenant; PII enmascarada; auditoría sin secretos; drafts con reintento y expiración; confirmación concurrente.
 - [ ] Comparar métricas, errores y latencia entre Go y Next.js.
 - [ ] 🔒 Revocar la conexión MCP activa con `client_id` legacy (`unknown_client`/`mcp-client`): inventario del 2026-09-15 → 3 conexiones activas válidas en Go y 1 legacy que dejará de funcionar.
-- [ ] 🔒 Cambiar clientes MCP y el webhook de Twilio a la URL de Go (sin cambiar a la vez URL, proveedor y semántica).
-- [ ] Retirar de Next.js: `src/lib/mcp/`, `src/lib/capabilities/`, `src/app/api/mcp/`, `src/app/api/actions/`, `src/app/api/webhooks/twilio/`.
+- [ ] 🔒 Cambiar los clientes MCP a la URL de Go (sin cambiar a la vez URL, proveedor y semántica). El webhook de Twilio, en `docs/plan-twilio.md`.
+- [ ] Retirar de Next.js: `src/lib/mcp/`, `src/lib/capabilities/`, `src/app/api/mcp/`, `src/app/api/actions/` (`src/app/api/webhooks/twilio/` se retira con el plan de Twilio).
 - [ ] Handoff: guía de conexión (MCP Inspector y un host real), inventario de tools y scopes, runbooks de revocación y de desactivación del módulo, variables documentadas sin valores, resultados de QA y pendientes de v2.
 
 ---
@@ -220,9 +269,13 @@ Todas: tenant solo desde la conexión (test que intenta pasar `tenantId`/`tenant
 | D3 | Varias conexiones activas del mismo cliente en distintos tenants | Gana la de `updated_at` más reciente (último consentimiento); el TS usaba `created_at`. | ✅ Confirmado |
 | D4 | Tenants en `trial` | Sin acceso, solo `active` (paridad TS). | Implementado; confirmar si es lo deseado |
 | D5 | Scopes / quién usa el MCP | v1: solo personal (`owner`, `admin`, `manager`), autorizado por rol; sin scopes por tool (Supabase no emite scopes propios). Clientes finales y asistente de la landing → fases v2 con un MCP separado. | ✅ Confirmado |
-| D6 | `MCP_ALLOWED_ROLES` en `.env.example` | Roles fijos en código (`owner`, `admin`, `manager`); eliminar la variable. | Pendiente |
+| D6 | `MCP_ALLOWED_ROLES` en `.env.example` | Roles fijos en código (`owner`, `admin`, `manager`); variable eliminada, junto con `MCP_AUDIT_RETENTION_DAYS` (la retención la aplica la función SQL). | ✅ Hecho |
 | D7 | Rate limiting multi-instancia | En memoria por instancia, 60 llamadas/min por conexión; peor caso = límite × `max-instances`. Cloud Armor por IP como capa opcional en la Fase 9. | ✅ Confirmado |
-| D8 | Deduplicación y resolución de tenant en Twilio | Tabla de eventos procesados + tenant por número destino o por cita notificada. Requiere migración en Next.js. | Pendiente (Fase 7) |
 | D9 | Pooler de Supabase en producción | Session Pooler (5432) con el rol `booknow_mcp_service`. | ✅ Validado con el smoke test |
-| D10 | Hallazgos de seguridad del webhook Twilio en producción actual | Corregir ya en Next.js o acelerar la Fase 7. | Pendiente |
 | D11 | Purga de auditoría MCP | `pg_cron` en Supabase con `purge_mcp_tool_calls()`; el rol del servicio no puede borrar. | ✅ Aplicado en producción (job diario 03:17 UTC) |
+| D12 | Retención de `mcp_appointment_drafts` (guarda `customer_notes` del LLM) | Purgar borradores no confirmados antiguos con el mismo cron; no incluido en la migración de la Fase 6. | Pendiente |
+| D14 | `source: "client_app"` en la app cliente de Next.js, rechazado por el `CHECK` | La ruta se usa (botón de reservar en `/c/[tenant]`) y en producción solo hay citas `web` (38): ninguna reserva del cliente se había guardado. Se usa `app` (solo código). | ✅ Commit `f451ed7` en Next.js, pendiente de push |
+| D19 | Fallback REST `/api/actions/*` (Fase 8) | Descartado: sin uso en 30 días y con fallos de seguridad en el TS; los clientes de IA hablan MCP. Se retira de Next.js en la Fase 10 y, si hiciera falta, se reimplementa en Go sobre los mismos casos de uso. | ✅ Confirmado (2026-09-22) |
+| D13 | Confirmar un borrador desde otra conexión del mismo tenant | Go exige mismo tenant, misma conexión y la misma `idempotencyKey` antes de llamar a la RPC (la RPC solo valida el rol del actor). | ✅ Confirmado |
+
+D8, D10 y D15–D18 (Twilio) se movieron a `docs/plan-twilio.md`.

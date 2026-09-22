@@ -25,10 +25,12 @@ type Deps struct {
 	DB Pinger
 	// MCP mounts /mcp and its OAuth metadata when Tokens and Access are set.
 	MCP MCPConfig
+	// Twilio mounts POST /webhooks/twilio when Validator is set.
+	Twilio TwilioConfig
 }
 
 // NewRouter builds the root handler.
-// Route groups to add as features land: /v1 (REST), /webhooks/twilio.
+// Route groups to add as features land: /v1 (REST).
 func NewRouter(logger *slog.Logger, deps Deps) http.Handler {
 	r := chi.NewRouter()
 
@@ -41,6 +43,10 @@ func NewRouter(logger *slog.Logger, deps Deps) http.Handler {
 
 	if deps.MCP.Tokens != nil && deps.MCP.Access != nil {
 		mountMCP(r, logger, deps.MCP)
+	}
+
+	if deps.Twilio.Validator != nil {
+		mountTwilio(r, logger, deps.Twilio)
 	}
 
 	return r

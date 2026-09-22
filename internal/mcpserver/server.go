@@ -13,13 +13,14 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/application/business"
+	"github.com/Ps3udoDev/booknow-mcp-service/internal/application/drafts"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/platform/audit"
 	"github.com/Ps3udoDev/booknow-mcp-service/internal/tenant"
 )
 
 const (
 	serverName    = "booknow-business-mcp"
-	serverVersion = "0.2.0"
+	serverVersion = "0.3.0"
 	// auditTimeout bounds the audit insert, which runs detached from the client's cancellation.
 	auditTimeout = 2 * time.Second
 )
@@ -28,6 +29,8 @@ const (
 const (
 	codeInvalidArgument = "INVALID_ARGUMENT"
 	codeNotFound        = "NOT_FOUND"
+	codeConflict        = "CONFLICT"
+	codeForbidden       = "FORBIDDEN"
 	codeInternal        = "INTERNAL"
 )
 
@@ -38,9 +41,10 @@ type clientError string
 
 func (e clientError) Error() string { return string(e) }
 
-// Deps are the collaborators tools need. Business tools are registered only when Business is set.
+// Deps are the collaborators tools need. Business and draft tools are registered only when their service is set.
 type Deps struct {
 	Business *business.Service
+	Drafts   *drafts.Service
 	// Audit is optional; nil disables tool call auditing.
 	Audit  audit.Recorder
 	Logger *slog.Logger
@@ -66,6 +70,10 @@ func New(access tenant.Access, deps Deps) *mcp.Server {
 		addBusinessTools(server, env)
 	}
 
+	if deps.Drafts != nil {
+		addDraftTools(server, env)
+	}
+
 	return server
 }
 
@@ -80,6 +88,8 @@ type toolSpec[In, Out any] struct {
 	// summary returns the audit summary for the input; it must not include personal data.
 	summary func(In) map[string]any
 	run     func(ctx context.Context, in In) (Out, error)
+	// risk defaults to audit.RiskRead.
+	risk audit.Risk
 }
 
 var readOnly = &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(false)}
@@ -100,7 +110,12 @@ func register[In, Out any](server *mcp.Server, env toolEnv, spec toolSpec[In, Ou
 			summary = spec.summary(in)
 		}
 
-		env.audit(ctx, spec.tool.Name, summary, status, code, time.Since(start))
+		risk := spec.risk
+		if risk == "" {
+			risk = audit.RiskRead
+		}
+
+		env.audit(ctx, spec.tool.Name, risk, summary, status, code, time.Since(start))
 
 		if clientErr != nil {
 			var zero Out
@@ -125,12 +140,16 @@ func classify(err error) (audit.Status, string, error) {
 		return audit.StatusFailed, codeInvalidArgument, clientError(be.Message)
 	case errors.As(err, &be) && errors.Is(err, business.ErrNotFound):
 		return audit.StatusFailed, codeNotFound, clientError(be.Message)
+	case errors.As(err, &be) && errors.Is(err, business.ErrConflict):
+		return audit.StatusFailed, codeConflict, clientError(be.Message)
+	case errors.As(err, &be) && errors.Is(err, business.ErrForbidden):
+		return audit.StatusDenied, codeForbidden, clientError(be.Message)
 	default:
 		return audit.StatusFailed, codeInternal, clientError(internalErrorMessage)
 	}
 }
 
-func (e toolEnv) audit(ctx context.Context, tool string, summary map[string]any, status audit.Status, code string, d time.Duration) {
+func (e toolEnv) audit(ctx context.Context, tool string, risk audit.Risk, summary map[string]any, status audit.Status, code string, d time.Duration) {
 	if e.deps.Audit == nil {
 		return
 	}
@@ -146,7 +165,7 @@ func (e toolEnv) audit(ctx context.Context, tool string, summary map[string]any,
 		ClientID:     e.access.ClientID,
 		RequestID:    rand.Text(),
 		ToolName:     tool,
-		Risk:         audit.RiskRead,
+		Risk:         risk,
 		Summary:      summary,
 		Status:       status,
 		ErrorCode:    code,

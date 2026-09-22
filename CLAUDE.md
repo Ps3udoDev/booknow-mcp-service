@@ -1,6 +1,6 @@
 # booknow-mcp-service
 
-Servidor dedicado en Go para BookNow: **MCP (Streamable HTTP)**, **webhooks/notificaciones Twilio WhatsApp** y API REST de negocio, sobre **Supabase** (Postgres + Auth) y desplegado en **Cloud Run**. Reemplaza gradualmente las rutas `/api/mcp`, `/api/actions/*` y `/api/webhooks/twilio` de la app Next.js en Vercel.
+Servidor dedicado en Go para BookNow: **MCP (Streamable HTTP)** y **webhooks/notificaciones Twilio WhatsApp**, sobre **Supabase** (Postgres + Auth) y desplegado en **Cloud Run**. Reemplaza gradualmente las rutas `/api/mcp` y `/api/webhooks/twilio` de la app Next.js en Vercel; `/api/actions/*` se retira sin migrar (D19).
 
 ## Estado del proyecto
 
@@ -40,18 +40,20 @@ internal/config/       carga y validación de env vars
 internal/httpapi/      router chi, middleware, handlers (solo transporte); /healthz (liveness), /readyz (ping a Postgres),
                        /mcp (Origin → Bearer → tenant → Streamable HTTP stateless con JSON) y /.well-known/oauth-protected-resource
 internal/mcpserver/    servidor MCP por request con tenant.Access ya resuelto; tools con auditoría y errores seguros
-internal/application/business/  casos de uso de lectura (snapshot, agenda, citas, clientes, huecos) y contrato del store
-internal/platform/{pii,audit,ratelimit}/  máscara de teléfono, registro de auditoría, rate limit en memoria
-internal/repository/postgres/{business,audit}.go  SQL de las tools y de mcp_tool_calls (tests de integración como booknow_mcp_service)
+internal/application/business/  casos de uso de lectura (snapshot, agenda, citas, clientes, huecos, CheckSlot) y contrato del store
+internal/application/drafts/    create/confirm de borradores de cita (idempotencia por conexión, humanSummary, mapeo de errores de la RPC)
+internal/platform/{pii,audit,ratelimit,logging}/  máscara de teléfono, registro de auditoría, rate limit en memoria, logger JSON para Cloud Logging
+internal/repository/postgres/{business,drafts,audit}.go  SQL de las tools, borradores/RPC y mcp_tool_calls (tests de integración como booknow_mcp_service, e2e MCP y concurrencia)
 internal/repository/postgres/  pgxpool (NewPool: ping al arrancar, límites de conexiones)
 internal/auth/         verificación JWT de Supabase (ES256 vía JWKS, iss/aud/exp/nbf/iat, kid obligatorio) y extracción Bearer
 internal/tenant/       autorización MCP: conexión activa exacta (usuario, client_id) + tenant activo + rol owner|admin|manager + módulo business-mcp; sin caché
 internal/repository/postgres/mcp_access.go  consulta de esa autorización (DBTX: pool o tx)
+deploy/cloudrun/       manifiesto de Cloud Run, valores por entorno (sin secretos), render.sh y smoke.sh (runbook: docs/runbook-cloud-run.md)
 ```
 
 Paquetes previstos (créalos cuando haya código real, no antes):
 
-`internal/application/drafts` (Fase 6), `internal/integration/{twilio,resend}`.
+`internal/integration/{twilio,resend}`.
 
 ## Comandos
 
@@ -73,7 +75,7 @@ Proyecto enlazado: `book-now-hub` (`rrnysepngbycvuciodoj`). **Las migraciones la
 # Snapshot de solo lectura del esquema remoto (gitignored; regenerar cuando Next.js migre)
 supabase db dump --linked -f supabase/migrations/00000000000000_remote_schema.sql
 supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supabase_pooler,realtime,storage-api,mailpit,postgres-meta
-supabase db reset                # carga supabase/roles.sql (roles que el dump no incluye) y reaplica el snapshot
+supabase db reset                # carga supabase/roles.sql (roles que el dump no incluye), reaplica el snapshot y supabase/seed.sql (REVOKE de funciones como en producción)
 supabase stop
 ```
 

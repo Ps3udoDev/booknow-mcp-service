@@ -34,3 +34,14 @@ jobs:
 
       - name: Vulnerabilities
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Shellcheck deploy scripts
+        run: shellcheck deploy/cloudrun/*.sh deploy/monitoring/*.sh
+
+      - name: Build production image
+        run: DOCKER_BUILDKIT=1 docker build -t booknow-mcp:ci .

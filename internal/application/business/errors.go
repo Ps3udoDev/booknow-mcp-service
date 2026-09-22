@@ -12,7 +12,16 @@ import (
 var (
 	ErrInvalidArgument = errors.New("invalid argument")
 	ErrNotFound        = errors.New("not found")
+	// ErrConflict means the request is valid but the current state prevents it (slot taken, draft expired).
+	ErrConflict = errors.New("conflict")
+	// ErrForbidden means the actor is no longer allowed to perform the operation.
+	ErrForbidden = errors.New("forbidden")
 )
+
+// NewError returns an Error of kind (one of the Err* values above) with a client-safe message.
+func NewError(kind error, message string) error {
+	return &Error{kind: kind, Message: message}
+}
 
 // Error carries a message that is safe to show to the MCP client (and the LLM).
 type Error struct {

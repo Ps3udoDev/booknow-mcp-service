@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Environment names accepted in APP_ENV.
@@ -42,6 +44,17 @@ type Config struct {
 	MCPAllowedOrigins []string
 	// MCPRateLimitPerMinute caps MCP requests per connection per instance.
 	MCPRateLimitPerMinute int
+	// MCPDraftTTL is how long an appointment draft waits for human approval before it expires.
+	MCPDraftTTL time.Duration
+
+	// TwilioAuthToken signs Twilio webhooks: it is a secret, never log it or include it in errors.
+	// Empty means the Twilio webhook is not configured and its route is not served.
+	TwilioAuthToken string
+	// TwilioWebhookURL is the public URL configured in Twilio, exactly as Twilio calls it:
+	// it is part of what Twilio signs, so it must match character by character.
+	TwilioWebhookURL string
+	// TwilioAccountSID is the only account whose webhooks are accepted. Required with the webhook.
+	TwilioAccountSID string
 }
 
 const (
@@ -49,6 +62,8 @@ const (
 	maxDBConns = 50
 	// maxRateLimitPerMinute keeps a typo from effectively disabling the MCP rate limit.
 	maxRateLimitPerMinute = 10000
+	// maxDraftTTLMinutes keeps drafts short-lived: the slot is not held while waiting for approval.
+	maxDraftTTLMinutes = 60
 )
 
 // Load reads configuration from the environment and validates it.
@@ -94,6 +109,11 @@ func load(getenv func(string) string) (Config, error) {
 	mcp, mcpErrs := loadMCP(getenv, env)
 	errs = append(errs, mcpErrs...)
 
+	tw, twilioErr := loadTwilio(getenv, env)
+	if twilioErr != nil {
+		errs = append(errs, twilioErr)
+	}
+
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)
 	}
@@ -110,6 +130,11 @@ func load(getenv func(string) string) (Config, error) {
 		MCPPublicURL:          mcp.MCPPublicURL,
 		MCPAllowedOrigins:     mcp.MCPAllowedOrigins,
 		MCPRateLimitPerMinute: mcp.MCPRateLimitPerMinute,
+		MCPDraftTTL:           mcp.MCPDraftTTL,
+
+		TwilioAuthToken:  tw.authToken,
+		TwilioWebhookURL: tw.webhookURL,
+		TwilioAccountSID: tw.accountSID,
 	}, nil
 }
 
@@ -134,6 +159,14 @@ func loadMCP(getenv func(string) string, env string) (Config, []error) {
 		errs = append(errs, fmt.Errorf("MCP_RATE_LIMIT_PER_MINUTE must be between 1 and %d, got %q",
 			maxRateLimitPerMinute, getenv("MCP_RATE_LIMIT_PER_MINUTE")))
 	}
+
+	draftTTL, err := strconv.Atoi(withDefault(getenv("MCP_DRAFT_TTL_MINUTES"), "10"))
+	if err != nil || draftTTL < 1 || draftTTL > maxDraftTTLMinutes {
+		errs = append(errs, fmt.Errorf("MCP_DRAFT_TTL_MINUTES must be between 1 and %d, got %q",
+			maxDraftTTLMinutes, getenv("MCP_DRAFT_TTL_MINUTES")))
+	}
+
+	cfg.MCPDraftTTL = time.Duration(draftTTL) * time.Minute
 
 	return cfg, errs
 }
@@ -193,4 +226,49 @@ func withDefault(v, def string) string {
 	}
 
 	return v
+}
+
+// twilioAccountSIDPattern is the shape of a Twilio account SID.
+var twilioAccountSIDPattern = regexp.MustCompile(`^AC[0-9a-f]{32}$`)
+
+type twilioSettings struct {
+	authToken  string
+	webhookURL string
+	accountSID string
+}
+
+// loadTwilio reads the incoming webhook settings. The token, URL and account travel together: a
+// partial set means a half-configured webhook, which would validate against the wrong URL or accept
+// any account. Errors never include the token.
+func loadTwilio(getenv func(string) string, env string) (twilioSettings, error) {
+	token := strings.TrimSpace(getenv("TWILIO_AUTH_TOKEN"))
+	raw := strings.TrimSpace(getenv("TWILIO_WEBHOOK_URL"))
+	accountSID := strings.TrimSpace(getenv("TWILIO_ACCOUNT_SID"))
+
+	if token == "" && raw == "" {
+		return twilioSettings{}, nil
+	}
+
+	if token == "" || raw == "" {
+		return twilioSettings{}, errors.New("TWILIO_AUTH_TOKEN and TWILIO_WEBHOOK_URL must be set together")
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil || !parsed.IsAbs() || parsed.Host == "" || parsed.User != nil {
+		return twilioSettings{}, fmt.Errorf("TWILIO_WEBHOOK_URL must be an absolute URL without credentials, got %q", raw)
+	}
+
+	if parsed.Path == "" || parsed.Path == "/" {
+		return twilioSettings{}, fmt.Errorf("TWILIO_WEBHOOK_URL must include the webhook path, got %q", raw)
+	}
+
+	if parsed.Scheme != "https" && (parsed.Scheme != "http" || env != EnvDevelopment) {
+		return twilioSettings{}, fmt.Errorf("TWILIO_WEBHOOK_URL must use https outside development, got %q", raw)
+	}
+
+	if !twilioAccountSIDPattern.MatchString(accountSID) {
+		return twilioSettings{}, errors.New("TWILIO_ACCOUNT_SID must be a Twilio account SID (AC + 32 hex) when the webhook is configured")
+	}
+
+	return twilioSettings{authToken: token, webhookURL: raw, accountSID: accountSID}, nil
 }

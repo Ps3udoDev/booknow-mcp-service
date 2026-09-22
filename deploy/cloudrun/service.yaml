@@ -1,0 +1,80 @@
+# Cloud Run service for booknow-mcp-service. Template: render it with deploy/cloudrun/render.sh <env> <image>
+# (never fill the placeholders by hand) and apply it with `gcloud run services replace`. Runbook: docs/runbook-cloud-run.md.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: ${SERVICE}
+  labels:
+    cloud.googleapis.com/location: ${REGION}
+    app: booknow-mcp
+    env: ${APP_ENV}
+  annotations:
+    # Reachable from the internet; who may call it is decided by IAM (staging) or by the app's Bearer auth (production).
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      labels:
+        app: booknow-mcp
+        env: ${APP_ENV}
+      annotations:
+        # MAX_INSTANCES × DB_MAX_CONNS must fit the Supabase Session Pooler pool size (see the runbook).
+        autoscaling.knative.dev/maxScale: "${MAX_INSTANCES}"
+        autoscaling.knative.dev/minScale: "0"
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      serviceAccountName: ${RUNTIME_SA}
+      # /mcp answers with JSON (stateless, no SSE stream), so the request timeout matches http.Server.WriteTimeout.
+      timeoutSeconds: 60
+      containerConcurrency: 40
+      containers:
+        - image: ${IMAGE}
+          ports:
+            - name: http1
+              containerPort: 8080
+          env:
+            # PORT is injected by Cloud Run; do not set it here.
+            - name: APP_ENV
+              value: "${APP_ENV}"
+            - name: LOG_LEVEL
+              value: "${LOG_LEVEL}"
+            - name: SUPABASE_URL
+              value: "${SUPABASE_URL}"
+            - name: SUPABASE_JWT_AUDIENCE
+              value: "authenticated"
+            - name: MCP_PUBLIC_URL
+              value: "${MCP_PUBLIC_URL}"
+            - name: MCP_ALLOWED_ORIGINS
+              value: "${MCP_ALLOWED_ORIGINS}"
+            - name: DB_MAX_CONNS
+              value: "${DB_MAX_CONNS}"
+            - name: MCP_DRAFT_TTL_MINUTES
+              value: "10"
+            - name: MCP_RATE_LIMIT_PER_MINUTE
+              value: "60"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ${DATABASE_URL_SECRET}
+                  # Pinned version: rotating the secret requires a new revision, never a silent change.
+                  key: "${DATABASE_URL_SECRET_VERSION}"
+          resources:
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          # Traffic only reaches a revision once Postgres answers (the process also pings it on boot).
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            periodSeconds: 3
+            timeoutSeconds: 3
+            failureThreshold: 10
+          # Liveness never depends on the database: a Supabase blip must not restart healthy instances.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 30
+            timeoutSeconds: 2
+            failureThreshold: 3
